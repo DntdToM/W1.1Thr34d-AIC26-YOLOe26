@@ -80,12 +80,8 @@ class VideoSegmenter:
 
             model.eval()
             if torch.cuda.is_available():
-                if self.use_fp16:
-                    model = model.cuda().half()
-                    logger.info("Đã khởi tạo mô hình TransNetV2 PyTorch (CUDA GPU FP16 Half-Precision) thành công.")
-                else:
-                    model = model.cuda()
-                    logger.info("Đã khởi tạo mô hình TransNetV2 PyTorch (CUDA GPU FP32) thành công.")
+                model = model.cuda()
+                logger.info("Đã khởi tạo mô hình TransNetV2 PyTorch (CUDA GPU) thành công.")
             else:
                 logger.info("Đã khởi tạo mô hình TransNetV2 PyTorch (CPU) thành công.")
             return model
@@ -139,10 +135,9 @@ class VideoSegmenter:
             input_tensor = torch.from_numpy(chunk_np).unsqueeze(0)
 
             if torch.cuda.is_available():
-                if self.use_fp16:
-                    input_tensor = input_tensor.cuda().half()
-                else:
-                    input_tensor = input_tensor.cuda().float()
+                input_tensor = input_tensor.cuda().float()
+            else:
+                input_tensor = input_tensor.float()
 
             with torch.no_grad():
                 output = self.transnet_model(input_tensor)

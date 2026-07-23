@@ -110,7 +110,10 @@ class AudioASRProcessor:
         """Khởi tạo mô hình PhoWhisper Small với FP16 precision."""
         if self.asr_pipeline is None:
             try:
-                from transformers import pipeline
+                try:
+                    from transformers import pipeline
+                except ImportError:
+                    from transformers.pipelines import pipeline
                 device = 0 if torch.cuda.is_available() else -1
                 torch_dtype = torch.float16 if (torch.cuda.is_available() and self.use_fp16) else torch.float32
 
