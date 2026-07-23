@@ -20,6 +20,9 @@ huggingface-hub>=0.20.0
 accelerate>=0.27.0
 transnetv2-pytorch>=0.1.0
 
+# LLM APIs
+groq>=0.4.0
+
 # Backend & Web API
 fastapi>=0.110.0
 uvicorn[standard]>=0.28.0

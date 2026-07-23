@@ -20,6 +20,7 @@ preprocessing:
     frame_rate: 1  # 1 frame per second sampling fallback
     transnet_threshold: 0.5
     window_size: 30  # Window-based LLM Context Summarization size in seconds
+    batch_windows: 3 # Gộp 3 cửa sổ 30s thành 1 LLM call (~90s/call)
   audio:
     sample_rate: 16000
     vad_threshold: 0.5
@@ -45,9 +46,11 @@ models:
     lang: "vi"
     use_angle_cls: true
   llm:
+    groq_api_key: "YOUR_GROQ_API_KEY_HERE"  # Set via environment variable GROQ_API_KEY or config
+    groq_model: "llama-3.3-70b-versatile"  # High performance Llama 3.3 70B model on Groq
+    gemini_api_key: "YOUR_GEMINI_API_KEY_HERE"  # Fallback Gemini Flash API Key
     ollama_url: "http://localhost:11434"
     model_name: "qwen2.5:7b-instruct-q4_K_M"  # 4-bit Quantized GGUF LLM
-    gemini_api_key: "YOUR_GEMINI_API_KEY_HERE"  # Set via environment variable GEMINI_API_KEY or config
 
 faiss:
   metric_type: "COSINE"  # Or INNER_PRODUCT / L2

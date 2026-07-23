@@ -43,12 +43,91 @@ def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
     return {}
 
 
+def call_groq_api(prompt: str, groq_key: str, model_name: str = "llama-3.3-70b-versatile") -> Optional[str]:
+    """
+    Gọi Groq API (sử dụng Groq SDK hoặc REST API siêu tốc > 300 tokens/sec).
+    Mô hình Llama-3.3-70B hiểu ngữ cảnh tiếng Việt rất sâu và sửa lỗi OCR cực mượt.
+    """
+    if not groq_key or groq_key == "YOUR_GROQ_API_KEY_HERE":
+        return None
+
+    # 1. Thử dùng thư viện groq chính thức nếu có
+    try:
+        from groq import Groq
+        client = Groq(api_key=groq_key)
+        completion = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Bạn là trợ lý AI chuyên nghiệp xử lý dữ liệu video. "
+                        "Nhiệm vụ: 1. Sửa lỗi chính tả OCR tiếng Việt. "
+                        "2. Lọc bỏ vật thể rác/lặp lại. "
+                        "3. Viết 1 đoạn tóm tắt ngữ cảnh ngắn gọn (< 50 từ)."
+                    )
+                },
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2,
+            max_tokens=300
+        )
+        if completion.choices:
+            res_text = completion.choices[0].message.content.strip()
+            if res_text:
+                logger.info(f"Đã phản hồi thành công từ Groq SDK ({model_name}).")
+                return res_text
+    except Exception:
+        pass
+
+    # 2. Fallback sang REST API thuần (không cần pip install groq)
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {groq_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": model_name,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Bạn là trợ lý AI chuyên nghiệp xử lý dữ liệu video. "
+                    "Nhiệm vụ: 1. Sửa lỗi chính tả OCR tiếng Việt. "
+                    "2. Lọc bỏ vật thể rác/lặp lại. "
+                    "3. Viết 1 đoạn tóm tắt ngữ cảnh ngắn gọn (< 50 từ)."
+                )
+            },
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.2,
+        "max_tokens": 300
+    }
+    try:
+        res = requests.post(url, headers=headers, json=payload, timeout=10)
+        if res.status_code == 200:
+            data = res.json()
+            choices = data.get("choices", [])
+            if choices and "message" in choices[0]:
+                res_text = choices[0]["message"].get("content", "").strip()
+                if res_text:
+                    logger.info(f"Đã phản hồi thành công từ Groq REST API ({model_name}).")
+                    return res_text
+        elif res.status_code == 429:
+            logger.warning(f"Groq API rate-limited (429). Chờ 3s...")
+            time.sleep(3)
+    except Exception as e:
+        logger.warning(f"Lỗi khi gọi Groq REST API ({model_name}): {e}")
+
+    return None
+
+
 def call_gemini_api(prompt: str, gemini_key: str) -> Optional[str]:
     """
     Gọi REST API của Google Gemini Flash (`gemini-flash-latest`).
     Tự động chèn delay 4s sau mỗi lần gọi thành công để tuân thủ rate-limit Free Tier (15 req/min).
     """
-    if not gemini_key:
+    if not gemini_key or gemini_key == "YOUR_GEMINI_API_KEY_HERE":
         return None
         
     for model_name in ["gemini-flash-latest", "gemini-2.0-flash", "gemini-pro-latest"]:
@@ -84,7 +163,7 @@ def call_gemini_api(prompt: str, gemini_key: str) -> Optional[str]:
 
 def correct_ocr_text(raw_text: str, config_path: str = "config.yaml") -> str:
     """
-    Sửa lỗi chính tả & khôi phục dấu tiếng Việt cho chuỗi OCR thô đơn lẻ bằng Gemini Flash API.
+    Sửa lỗi chính tả & khôi phục dấu tiếng Việt cho chuỗi OCR thô bằng Groq API / Gemini Flash API.
     """
     if not raw_text or not raw_text.strip():
         return ""
@@ -101,14 +180,22 @@ def correct_ocr_text(raw_text: str, config_path: str = "config.yaml") -> str:
         f"Văn bản OCR thô:\n\"{raw_text}\""
     )
 
-    # 1. Thử gọi Gemini Flash API (Lấy từ GEMINI_API_KEY hoặc config.yaml)
+    # 1. Thử gọi Groq API (Ưu tiên số 1 - Siêu tốc > 300 tokens/s)
+    groq_key = os.getenv("GROQ_API_KEY") or llm_cfg.get("groq_api_key", "")
+    groq_model = llm_cfg.get("groq_model", "llama-3.3-70b-versatile")
+    if groq_key:
+        groq_res = call_groq_api(prompt, groq_key, model_name=groq_model)
+        if groq_res:
+            return groq_res
+
+    # 2. Thử gọi Gemini Flash API
     gemini_key = os.getenv("GEMINI_API_KEY") or llm_cfg.get("gemini_api_key", "")
     if gemini_key:
         gemini_res = call_gemini_api(prompt, gemini_key)
         if gemini_res:
             return gemini_res
 
-    # 2. Thử gọi OpenAI API
+    # 3. Thử gọi OpenAI API
     openai_key = os.getenv("OPENAI_API_KEY")
     if openai_key:
         try:
@@ -123,7 +210,7 @@ def correct_ocr_text(raw_text: str, config_path: str = "config.yaml") -> str:
         except Exception as e:
             logger.warning(f"Gọi OpenAI API không thành công: {e}")
 
-    # 3. Fallback sang Ollama Local (Qwen2.5-7B) — CHỈ khi Ollama đang chạy
+    # 4. Fallback sang Ollama Local (Qwen2.5-7B) — CHỈ khi Ollama đang chạy
     ollama_url = llm_cfg.get("ollama_url", "http://localhost:11434")
     model_name = llm_cfg.get("model_name", "qwen2.5:7b-instruct-q4_K_M")
     
@@ -146,7 +233,7 @@ def correct_ocr_text(raw_text: str, config_path: str = "config.yaml") -> str:
 
 def summarize_window_with_llm(window_data_str: str, config_path: str = "config.yaml") -> str:
     """
-    Gọi API Gemini Flash (hoặc Local Ollama/Qwen2.5) 
+    Gọi API Groq / Gemini Flash / Local Ollama 
     ĐÚNG 1 LẦN cho mỗi cửa sổ 30 giây để tổng hợp ngữ cảnh bối cảnh chung (< 50 từ).
     """
     if not window_data_str or not window_data_str.strip():
@@ -161,14 +248,22 @@ def summarize_window_with_llm(window_data_str: str, config_path: str = "config.y
         "Hãy sửa lỗi chính tả OCR, loại bỏ các vật thể nhiễu, và viết một metadata tổng hợp (chưa tới 50 từ) mô tả bối cảnh chung của toàn bộ 30 giây này."
     )
 
-    # 1. Thử gọi Gemini Flash API
+    # 1. Thử gọi Groq API (Ưu tiên số 1 - Siêu tốc > 300 tokens/s)
+    groq_key = os.getenv("GROQ_API_KEY") or llm_cfg.get("groq_api_key", "")
+    groq_model = llm_cfg.get("groq_model", "llama-3.3-70b-versatile")
+    if groq_key:
+        groq_res = call_groq_api(prompt, groq_key, model_name=groq_model)
+        if groq_res:
+            return groq_res
+
+    # 2. Thử gọi Gemini Flash API
     gemini_key = os.getenv("GEMINI_API_KEY") or llm_cfg.get("gemini_api_key", "")
     if gemini_key:
         gemini_res = call_gemini_api(prompt, gemini_key)
         if gemini_res:
             return gemini_res
 
-    # 2. Thử gọi OpenAI API
+    # 3. Thử gọi OpenAI API
     openai_key = os.getenv("OPENAI_API_KEY")
     if openai_key:
         try:
@@ -183,7 +278,7 @@ def summarize_window_with_llm(window_data_str: str, config_path: str = "config.y
         except Exception as e:
             logger.warning(f"Gọi OpenAI API cho Window Summary không thành công: {e}")
 
-    # 3. Local LLM Ollama (Qwen2.5-7B) — CHỈ khi Ollama đang chạy
+    # 4. Local LLM Ollama (Qwen2.5-7B) — CHỈ khi Ollama đang chạy
     ollama_url = llm_cfg.get("ollama_url", "http://localhost:11434")
     model_name = llm_cfg.get("model_name", "qwen2.5:7b-instruct-q4_K_M")
 
