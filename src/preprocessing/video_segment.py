@@ -137,12 +137,12 @@ class VideoSegmenter:
         for i in range(0, len(frames), batch_size):
             chunk_frames = frames[i:i + batch_size]
             chunk_np = np.array(chunk_frames, dtype=np.uint8)
-            input_tensor = torch.from_numpy(chunk_np).unsqueeze(0)
+            input_tensor = torch.from_numpy(chunk_np).unsqueeze(0)  # [1, T, 27, 48, 3] uint8
 
+            # TransNetV2 BẮT BUỘC input dtype=uint8, shape [B, T, 27, 48, 3]
+            # Model tự convert sang float và chia 255 bên trong forward()
             if torch.cuda.is_available():
-                input_tensor = input_tensor.cuda().float()
-            else:
-                input_tensor = input_tensor.float()
+                input_tensor = input_tensor.cuda()  # Giữ nguyên uint8, chỉ chuyển lên GPU
 
             with torch.no_grad():
                 output = self.transnet_model(input_tensor)

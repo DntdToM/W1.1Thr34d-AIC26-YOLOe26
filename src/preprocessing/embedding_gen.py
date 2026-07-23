@@ -92,16 +92,31 @@ class EmbeddingGenerator:
                 ).to(self.device)
                 self.text_model.eval()
 
-    def get_image_embeddings_batch(self, images: List[Union[str, Image.Image]]) -> np.ndarray:
+    def get_image_embeddings_batch(self, images: List[Union[str, Image.Image]], batch_size: int = 64) -> np.ndarray:
         """
         Nhận vào BATCH đường dẫn ảnh hoặc PIL Image objects.
         Trả về numpy array dạng [N, 768] (float32) đã được L2 Normalized cho Cosine Similarity.
+        Tự động chia thành batch nhỏ (mặc định 64) để tránh OOM khi xử lý hàng nghìn ảnh.
         """
         if not images:
             return np.empty((0, 768), dtype=np.float32)
 
         self._init_vision_model()
 
+        # Chunk thành batch nhỏ để tránh OOM (VD: 14,480 ảnh → 227 batch × 64 ảnh)
+        if len(images) > batch_size:
+            all_embeddings = []
+            for i in range(0, len(images), batch_size):
+                chunk = images[i:i + batch_size]
+                chunk_emb = self._embed_image_chunk(chunk)
+                all_embeddings.append(chunk_emb)
+                logger.info(f"Image Embedding batch {i // batch_size + 1}/{(len(images) + batch_size - 1) // batch_size} done ({len(chunk)} images)")
+            return np.concatenate(all_embeddings, axis=0)
+        
+        return self._embed_image_chunk(images)
+
+    def _embed_image_chunk(self, images: List[Union[str, Image.Image]]) -> np.ndarray:
+        """Embed một chunk nhỏ ảnh (không quá batch_size) thành numpy array [N, 768]."""
         loaded_images = []
         for img in images:
             if isinstance(img, str):
