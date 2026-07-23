@@ -52,6 +52,10 @@ class EmbeddingGenerator:
         self.text_model = None
         self.text_tokenizer = None
 
+        # Eager Loading: Nạp mô hình ngay ở Main Thread để tránh xung đột luồng
+        self._init_vision_model()
+        self._init_text_model()
+
     def _init_vision_model(self):
         """Lazy loading mô hình SigLIP 2 từ HuggingFace transformers (chế độ FP16 trên GPU)."""
         if self.vision_model is None:

@@ -112,9 +112,13 @@ class MultiThreadPipelineWorker:
 
     def __init__(self, config_path: str = "config.yaml"):
         self.config_path = config_path
-        self.config = load_config(config_path)
+        import torch
+        if torch.cuda.is_available():
+            self.max_workers = 1
+            logger.info("Phát hiện CUDA GPU: Tự động tối ưu max_workers=1 để dồn 100% CUDA Compute và triệt tiêu treo luồng VRAM.")
+        else:
+            self.max_workers = self.config.get("preprocessing", {}).get("max_workers", 8)
         
-        self.max_workers = self.config.get("preprocessing", {}).get("max_workers", 8)
         self.frames_dir = self.config.get("paths", {}).get("frames_dir", "processed_data/1_frames")
         self.embeddings_dir = self.config.get("paths", {}).get("embeddings_dir", "processed_data/2_embeddings")
         self.metadata_dir = self.config.get("paths", {}).get("metadata_dir", "processed_data/3_metadata")
