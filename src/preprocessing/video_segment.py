@@ -125,6 +125,11 @@ class VideoSegmenter:
         if len(frames) == 0:
             raise ValueError(f"Không đọc được khung hình nào từ video {video_path}")
 
+        # Nếu video quá ngắn (< 10 frames), trả về 1 shot duy nhất thay vì đưa qua 3D Conv TransNetV2
+        if len(frames) < 10:
+            logger.info(f"Video {video_path} quá ngắn ({len(frames)} frames), tự động coi là 1 shot duy nhất.")
+            return [(0, len(frames) - 1)]
+
         # Dự đoán theo batch 1000 frames để tiết kiệm RAM
         batch_size = 1000
         predictions_list = []
