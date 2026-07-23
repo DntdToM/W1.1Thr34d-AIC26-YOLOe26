@@ -9,7 +9,7 @@ import os
 import json
 import time
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 import yaml
 import numpy as np
