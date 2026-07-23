@@ -1,11 +1,14 @@
 """
 Vision Analytics Module (YOLOv9 & EasyOCR / PaddleOCR + Window-Based LLM Context Summarization + Gemini API)
 - Trích xuất đặc trưng độc lập: YOLOv9 (Object Detection) & EasyOCR / PaddleOCR (Text Reading).
-- Tổng hợp ngữ cảnh theo cửa sổ 30s (Window-Based): Gọi Gemini Flash API (hoặc Ollama Local) ĐÚNG 1 LẦN cho mỗi 30s 
-  để sửa lỗi OCR, lọc nhiễu vật thể và viết metadata tổng hợp (< 50 từ) mô tả bối cảnh chung. Tránh ảo giác ReCap / RNN.
+- Tổng hợp ngữ cảnh theo cửa sổ (Window-Based): Gọi Gemini Flash API ĐÚNG 1 LẦN cho mỗi batch cửa sổ
+  để sửa lỗi OCR, lọc nhiễu vật thể và viết metadata tổng hợp (< 50 từ) mô tả bối cảnh chung.
+- Rate-limit Gemini API: 4s delay giữa các lần gọi để tránh bị chặn bởi Free Tier (15 req/min).
+- Tự động phát hiện & vô hiệu hóa Ollama fallback khi chạy trên Kaggle/Cloud (tránh spam Connection refused).
 """
 
 import os
+import time
 import logging
 from typing import List, Dict, Any, Optional
 import yaml
@@ -14,6 +17,23 @@ import torch
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("VisionAnalytics")
+
+# === Auto-detect Ollama availability (chỉ kiểm tra 1 lần duy nhất khi import module) ===
+_OLLAMA_AVAILABLE: Optional[bool] = None
+
+def _check_ollama_available(ollama_url: str = "http://localhost:11434") -> bool:
+    """Kiểm tra Ollama có đang chạy không. Chỉ gọi 1 lần duy nhất, cache kết quả."""
+    global _OLLAMA_AVAILABLE
+    if _OLLAMA_AVAILABLE is not None:
+        return _OLLAMA_AVAILABLE
+    try:
+        res = requests.get(f"{ollama_url}/api/tags", timeout=2)
+        _OLLAMA_AVAILABLE = res.status_code == 200
+    except Exception:
+        _OLLAMA_AVAILABLE = False
+    if not _OLLAMA_AVAILABLE:
+        logger.info("Ollama Local LLM không khả dụng (Kaggle/Cloud). Đã vô hiệu hóa fallback Ollama.")
+    return _OLLAMA_AVAILABLE
 
 
 def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
@@ -25,7 +45,8 @@ def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
 
 def call_gemini_api(prompt: str, gemini_key: str) -> Optional[str]:
     """
-    Gọi REST API của Google Gemini Flash (`gemini-flash-latest`) cực nhanh mà không cần cài thêm gói bên thứ 3.
+    Gọi REST API của Google Gemini Flash (`gemini-flash-latest`).
+    Tự động chèn delay 4s sau mỗi lần gọi thành công để tuân thủ rate-limit Free Tier (15 req/min).
     """
     if not gemini_key:
         return None
@@ -39,7 +60,7 @@ def call_gemini_api(prompt: str, gemini_key: str) -> Optional[str]:
             }]
         }
         try:
-            res = requests.post(url, headers=headers, json=payload, timeout=8)
+            res = requests.post(url, headers=headers, json=payload, timeout=12)
             if res.status_code == 200:
                 res_data = res.json()
                 candidates = res_data.get("candidates", [])
@@ -48,7 +69,13 @@ def call_gemini_api(prompt: str, gemini_key: str) -> Optional[str]:
                     if parts and "text" in parts[0]:
                         text_out = parts[0]["text"].strip()
                         logger.info(f"Đã phản hồi thành công từ Gemini API ({model_name}).")
+                        # Rate-limit: chờ 4s giữa các request để không bị Gemini Free Tier chặn
+                        time.sleep(4)
                         return text_out
+            elif res.status_code == 429:
+                logger.warning(f"Gemini API rate-limited (429). Chờ 10s rồi thử lại...")
+                time.sleep(10)
+                continue
         except Exception as e:
             logger.warning(f"Lỗi khi gọi Gemini API ({model_name}): {e}")
             
@@ -96,22 +123,23 @@ def correct_ocr_text(raw_text: str, config_path: str = "config.yaml") -> str:
         except Exception as e:
             logger.warning(f"Gọi OpenAI API không thành công: {e}")
 
-    # 3. Fallback sang Ollama Local (Qwen2.5-7B)
+    # 3. Fallback sang Ollama Local (Qwen2.5-7B) — CHỈ khi Ollama đang chạy
     ollama_url = llm_cfg.get("ollama_url", "http://localhost:11434")
     model_name = llm_cfg.get("model_name", "qwen2.5:7b-instruct-q4_K_M")
     
-    try:
-        res = requests.post(
-            f"{ollama_url}/api/generate",
-            json={"model": model_name, "prompt": prompt, "stream": False},
-            timeout=8
-        )
-        if res.status_code == 200:
-            fixed_text = res.json().get("response", "").strip()
-            if fixed_text:
-                return fixed_text
-    except Exception as e:
-        logger.warning(f"Không thể kết nối Ollama Local LLM: {e}")
+    if _check_ollama_available(ollama_url):
+        try:
+            res = requests.post(
+                f"{ollama_url}/api/generate",
+                json={"model": model_name, "prompt": prompt, "stream": False},
+                timeout=8
+            )
+            if res.status_code == 200:
+                fixed_text = res.json().get("response", "").strip()
+                if fixed_text:
+                    return fixed_text
+        except Exception as e:
+            logger.warning(f"Không thể kết nối Ollama Local LLM: {e}")
 
     return raw_text.strip()
 
@@ -155,32 +183,34 @@ def summarize_window_with_llm(window_data_str: str, config_path: str = "config.y
         except Exception as e:
             logger.warning(f"Gọi OpenAI API cho Window Summary không thành công: {e}")
 
-    # 3. Local LLM Ollama (Qwen2.5-7B)
+    # 3. Local LLM Ollama (Qwen2.5-7B) — CHỈ khi Ollama đang chạy
     ollama_url = llm_cfg.get("ollama_url", "http://localhost:11434")
     model_name = llm_cfg.get("model_name", "qwen2.5:7b-instruct-q4_K_M")
 
-    try:
-        res = requests.post(
-            f"{ollama_url}/api/generate",
-            json={"model": model_name, "prompt": prompt, "stream": False},
-            timeout=10
-        )
-        if res.status_code == 200:
-            summary_text = res.json().get("response", "").strip()
-            if summary_text:
-                return summary_text
-    except Exception as e:
-        logger.warning(f"Không thể kết nối Ollama Local LLM cho Window Summary: {e}")
+    if _check_ollama_available(ollama_url):
+        try:
+            res = requests.post(
+                f"{ollama_url}/api/generate",
+                json={"model": model_name, "prompt": prompt, "stream": False},
+                timeout=10
+            )
+            if res.status_code == 200:
+                summary_text = res.json().get("response", "").strip()
+                if summary_text:
+                    return summary_text
+        except Exception as e:
+            logger.warning(f"Không thể kết nối Ollama Local LLM cho Window Summary: {e}")
 
     return window_data_str.strip()
 
 
 def window_based_summarize(frames_data: List[Dict[str, Any]], window_size: Optional[int] = None, config_path: str = "config.yaml") -> List[Dict[str, Any]]:
     """
-    HÀM HẬU XỬ LÝ LLM THEO CỬA SỔ (WINDOW-BASED):
-    1. Gom nhóm (batching) dữ liệu thô (objects, ocr_raw, ocr_fixed) của tất cả các frames trong cùng cửa sổ 30 giây.
-    2. Gọi Gemini Flash API ĐÚNG 1 LẦN cho mỗi cửa sổ 30 giây này.
-    3. Gắn chuỗi metadata tổng hợp thu được vào trường `context_summary` cho tất cả các frames thuộc cửa sổ đó.
+    HÀM HẬU XỬ LÝ LLM THEO CỬA SỔ (WINDOW-BASED) + BATCHING:
+    1. Gom nhóm (batching) dữ liệu thô của tất cả frames trong cùng cửa sổ 30 giây.
+    2. GỘP 3 cửa sổ liên tiếp thành 1 batch (~90s) → gọi Gemini ĐÚNG 1 LẦN cho batch đó.
+       Giảm 3x số lần gọi API, tuân thủ Gemini Free Tier rate-limit (15 req/min).
+    3. Gắn chuỗi metadata tổng hợp vào trường `context_summary` cho tất cả frames thuộc batch.
     """
     if not frames_data:
         return []
@@ -188,6 +218,9 @@ def window_based_summarize(frames_data: List[Dict[str, Any]], window_size: Optio
     config = load_config(config_path)
     if window_size is None:
         window_size = config.get("preprocessing", {}).get("video", {}).get("window_size", 30)
+    
+    # Số cửa sổ gộp thành 1 batch LLM call (mặc định 3 → 90s/call)
+    batch_windows = config.get("preprocessing", {}).get("video", {}).get("batch_windows", 3)
 
     window_ms = window_size * 1000
     
@@ -200,37 +233,49 @@ def window_based_summarize(frames_data: List[Dict[str, Any]], window_size: Optio
             windows[win_idx] = []
         windows[win_idx].append(frame)
 
-    # 2. Xử lý từng cửa sổ 30s
-    for win_idx, win_frames in windows.items():
-        start_sec = win_idx * window_size
-        end_sec = start_sec + window_size
+    # 2. Gộp batch_windows cửa sổ liên tiếp → 1 LLM call
+    sorted_win_indices = sorted(windows.keys())
+    total_batches = (len(sorted_win_indices) + batch_windows - 1) // batch_windows
+    
+    for batch_i in range(0, len(sorted_win_indices), batch_windows):
+        batch_indices = sorted_win_indices[batch_i:batch_i + batch_windows]
+        batch_num = batch_i // batch_windows + 1
         
+        # Gom dữ liệu từ tất cả cửa sổ trong batch
+        batch_start_sec = batch_indices[0] * window_size
+        batch_end_sec = (batch_indices[-1] + 1) * window_size
+        batch_frames = []
         all_objects = []
         all_ocr = []
-        for f in win_frames:
-            objs = f.get("objects", [])
-            if isinstance(objs, list):
-                all_objects.extend(objs)
-            elif isinstance(objs, str) and objs:
-                all_objects.append(objs)
+        
+        for win_idx in batch_indices:
+            win_frames = windows[win_idx]
+            batch_frames.extend(win_frames)
             
-            ocr_text = f.get("ocr_fixed") or f.get("ocr_raw") or ""
-            if ocr_text.strip():
-                all_ocr.append(ocr_text.strip())
+            for f in win_frames:
+                objs = f.get("objects", [])
+                if isinstance(objs, list):
+                    all_objects.extend(objs)
+                elif isinstance(objs, str) and objs:
+                    all_objects.append(objs)
+                
+                ocr_text = f.get("ocr_fixed") or f.get("ocr_raw") or ""
+                if ocr_text.strip():
+                    all_ocr.append(ocr_text.strip())
 
         unique_objects = list(set(all_objects))
         unique_ocr = list(set(all_ocr))
 
         window_data_str = (
-            f"Thời gian Cửa sổ: {start_sec}s - {end_sec}s. "
+            f"Thời gian: {batch_start_sec}s - {batch_end_sec}s. "
             f"Vật thể xuất hiện: {', '.join(unique_objects) if unique_objects else 'Không có'}. "
             f"Văn bản đọc được (OCR): {' | '.join(unique_ocr) if unique_ocr else 'Không có'}."
         )
 
-        logger.info(f"Đang tổng hợp LLM Context cho Cửa sổ {window_size}s [{start_sec}s - {end_sec}s] ({len(win_frames)} frames)...")
+        logger.info(f"Đang tổng hợp LLM Context batch {batch_num}/{total_batches} [{batch_start_sec}s - {batch_end_sec}s] ({len(batch_frames)} frames)...")
         context_summary = summarize_window_with_llm(window_data_str, config_path=config_path)
 
-        for f in win_frames:
+        for f in batch_frames:
             f["context_summary"] = context_summary
 
     return frames_data
