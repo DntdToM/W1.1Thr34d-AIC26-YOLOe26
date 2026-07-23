@@ -1,0 +1,68 @@
+# AIC2026 Multimedia Retrieval System - Central Configuration
+
+paths:
+  data_dir: "data"
+  dummy_videos_dir: "data/dummy_videos"
+  official_videos_dir: "data/official_videos"
+  processed_dir: "processed_data"
+  frames_dir: "processed_data/1_frames"
+  embeddings_dir: "processed_data/2_embeddings"
+  metadata_dir: "processed_data/3_metadata"
+  sqlite_db_path: "processed_data/3_metadata/metadata.db"
+  faiss_index_path: "processed_data/2_embeddings/faiss_index.bin"
+  models_dir: "models"
+
+preprocessing:
+  max_workers: 8  # CPU multi-threading worker count
+  batch_size: 32
+  use_fp16: true  # Quantization: Enable FP16 precision for GPU models to save 60-70% VRAM
+  video:
+    frame_rate: 1  # 1 frame per second sampling fallback
+    transnet_threshold: 0.5
+    window_size: 30  # Window-based LLM Context Summarization size in seconds
+  audio:
+    sample_rate: 16000
+    vad_threshold: 0.5
+    silero_vad_model: "snakers4/silero-vad"
+    phowhisper_model: "models/phowhisper-small"  # Local Workspace model directory
+
+models:
+  transnet_v2:
+    weights_path: "src/preprocessing/weights/transnetv2-pytorch-weights.pth"
+    threshold: 0.5
+  vision_embedding:
+    name: "models/siglip-base-patch16-224"  # Local Workspace SigLIP 2 model directory
+    dimension: 768
+    device: "cuda"
+  text_embedding:
+    name: "models/bge-m3"  # Local Workspace BGE-M3 model directory
+    dimension: 1024
+    device: "cuda"
+  object_detection:
+    yolo_model: "yolov9c.pt"
+    confidence_threshold: 0.35
+  ocr:
+    lang: "vi"
+    use_angle_cls: true
+  llm:
+    ollama_url: "http://localhost:11434"
+    model_name: "qwen2.5:7b-instruct-q4_K_M"  # 4-bit Quantized GGUF LLM
+    gemini_api_key: "YOUR_GEMINI_API_KEY_HERE"  # Set via environment variable GEMINI_API_KEY or config
+
+faiss:
+  metric_type: "COSINE"  # Or INNER_PRODUCT / L2
+  dimension: 768
+  index_type: "IndexFlatIP"  # For exact cosine similarity; can use IndexIVFFlat for large scale
+
+late_fusion:
+  max_gap_ms: 3000  # Dynamic Scene-aware Clipping max time gap between adjacent shots
+  weights:
+    image: 0.7
+    audio: 0.2
+    meta: 0.1
+  top_k_retrieval: 100
+  top_k_rerank: 30
+
+backend:
+  host: "0.0.0.0"
+  port: 8000

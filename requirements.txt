@@ -1,0 +1,37 @@
+# Core & ML Libraries
+torch>=2.1.0
+torchvision>=0.16.0
+numpy>=1.24.0
+opencv-python>=4.8.0
+Pillow>=10.0.0
+PyYAML>=6.0.1
+
+# Vector Search & Metadata
+faiss-cpu>=1.7.4
+
+# Vision & OCR & ASR Models
+ultralytics>=8.1.0       # YOLOv9 support
+easyocr>=1.7.0
+sentencepiece>=0.2.0
+protobuf>=4.25.0
+transformers>=4.38.0
+sentence-transformers>=2.5.0
+huggingface-hub>=0.20.0
+accelerate>=0.27.0
+transnetv2-pytorch>=0.1.0
+
+# Backend & Web API
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+pydantic>=2.6.0
+requests>=2.31.0
+
+# Web UI & Visualization
+streamlit>=1.32.0
+
+# Utilities & Tools
+tqdm>=4.66.0
+python-dotenv>=1.0.0
+imageio-ffmpeg>=0.4.9
+scipy>=1.11.0
+gdown>=5.1.0

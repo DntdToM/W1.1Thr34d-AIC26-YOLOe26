@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.env
+
+# Data & Output Artifacts
+processed_data/1_frames/*
+!processed_data/1_frames/.gitkeep
+processed_data/2_embeddings/*
+!processed_data/2_embeddings/.gitkeep
+processed_data/3_metadata/*
+!processed_data/3_metadata/.gitkeep
+data/dummy_videos/*
+!data/dummy_videos/.gitkeep
+data/official_videos/*
+!data/official_videos/.gitkeep
+
+# Models & Large Weights
+*.pt
+*.bin
+*.onnx
+*.gguf
+*.safetensors
+models/*
+!models/.gitkeep
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
