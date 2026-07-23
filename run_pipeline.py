@@ -24,13 +24,13 @@ def load_config(config_path: str = "config.yaml"):
 
 def scan_video_files(official_dir: str, dummy_dir: str) -> list:
     """
-    Quét toàn bộ video trong data/official_videos/.
-    Nếu chưa có video chính thức từ BTC, chuyển sang quét data/dummy_videos/ để chạy thử nghiệm.
+    Quét đệ quy toàn bộ video trong data/official_videos/ và data/dummy_videos/.
+    Hỗ trợ quét video nằm trong các thư mục con giải nén từ file ZIP.
     """
     video_extensions = ("*.mp4", "*.avi", "*.mkv", "*.mov")
     video_files = []
     
-    # 1. Ưu tiên quét trong official_videos
+    # 1. Ưu tiên quét đệ quy trong official_videos
     for ext in video_extensions:
         video_files.extend(glob.glob(os.path.join(official_dir, ext)))
         video_files.extend(glob.glob(os.path.join(official_dir, "**", ext), recursive=True))
@@ -39,10 +39,11 @@ def scan_video_files(official_dir: str, dummy_dir: str) -> list:
         logger.info(f"Phát hiện {len(video_files)} video chính thức trong '{official_dir}'.")
         return sorted(list(set(video_files)))
 
-    # 2. Fallback quét trong dummy_videos nếu chưa có video chính thức
+    # 2. Fallback quét đệ quy trong dummy_videos nếu chưa có video chính thức
     logger.warning(f"Chưa có video nào trong '{official_dir}'. Đang tìm kiếm trong '{dummy_dir}'...")
     for ext in video_extensions:
         video_files.extend(glob.glob(os.path.join(dummy_dir, ext)))
+        video_files.extend(glob.glob(os.path.join(dummy_dir, "**", ext), recursive=True))
     
     if video_files:
         logger.info(f"Phát hiện {len(video_files)} video chạy thử nghiệm trong '{dummy_dir}'.")
