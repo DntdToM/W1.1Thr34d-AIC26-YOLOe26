@@ -112,6 +112,7 @@ class MultiThreadPipelineWorker:
 
     def __init__(self, config_path: str = "config.yaml"):
         self.config_path = config_path
+        self.config = load_config(config_path)
         import torch
         if torch.cuda.is_available():
             self.max_workers = 1
