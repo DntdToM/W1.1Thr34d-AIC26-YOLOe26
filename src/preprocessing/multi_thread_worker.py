@@ -145,13 +145,9 @@ class MultiThreadPipelineWorker:
         logger.info(f"=== Bắt đầu xử lý Video: {video_name} ===")
 
         try:
-            # 1. Chạy song song bóc tách video & audio bằng ThreadPoolExecutor nội bộ trên Singleton models
-            with ThreadPoolExecutor(max_workers=2) as inner_executor:
-                future_video = inner_executor.submit(self.segmenter.process_video, video_path)
-                future_audio = inner_executor.submit(self.audio_processor.process_audio, video_path)
-
-                keyframes_meta = future_video.result()
-                asr_map = future_audio.result()
+            # 1. Bóc tách video keyframes & audio ASR trên Singleton models
+            keyframes_meta = self.segmenter.process_video(video_path)
+            asr_map = self.audio_processor.process_audio(video_path)
 
             logger.info(f"[{video_name}] Bóc tách xong {len(keyframes_meta)} keyframes và {len(asr_map)} đoạn ASR.")
 
