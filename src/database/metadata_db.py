@@ -1,23 +1,18 @@
-"""
-Metadata Database Module (SQLite / Elasticsearch)
-Quản lý thông tin chi tiết của Video, Shots, Keyframes, Timestamp, ASR, OCR text, và Window Context Summaries.
-"""
+"""SQLite database wrapper for managing frame-level metadata."""
 
 import sqlite3
 from typing import Dict, Any, List, Optional
 
 
 class MetadataDB:
-    """
-    SQLite Database Wrapper quản lý Metadata khung hình và video.
-    """
+    """SQLite Database wrapper for video and frame metadata persistence."""
 
     def __init__(self, db_path: str = "processed_data/3_metadata/metadata.db"):
         self.db_path = db_path
         self._init_db()
 
     def _init_db(self):
-        """Khởi tạo schema bảng SQLite."""
+        """Initialize database schema and set WAL journal mode."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("PRAGMA journal_mode=WAL;")
@@ -36,7 +31,6 @@ class MetadataDB:
                     context_summary TEXT
                 )
             """)
-            # Kiểm tra xem các cột mới (shot_id, frame_type, context_summary) đã có chưa cho DB cũ
             cursor.execute("PRAGMA table_info(frame_metadata)")
             columns = [col[1] for col in cursor.fetchall()]
             if "shot_id" not in columns:
@@ -49,7 +43,7 @@ class MetadataDB:
             conn.commit()
 
     def insert_frame_metadata(self, data: Dict[str, Any]):
-        """Chèn hoặc cập nhật metadata khung hình vào cơ sở dữ liệu."""
+        """Insert or replace frame metadata entry into the database."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -71,7 +65,7 @@ class MetadataDB:
             conn.commit()
 
     def get_by_frame_path(self, frame_path: str) -> Optional[Dict[str, Any]]:
-        """Truy vấn metadata theo đường dẫn frame_path."""
+        """Retrieve metadata record by frame path."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM frame_metadata WHERE frame_path = ?", (frame_path,))
@@ -81,7 +75,7 @@ class MetadataDB:
         return None
 
     def get_by_id(self, frame_id: int) -> Optional[Dict[str, Any]]:
-        """Lấy metadata theo ID chính."""
+        """Retrieve metadata record by primary ID."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM frame_metadata WHERE id = ?", (frame_id,))
@@ -91,8 +85,7 @@ class MetadataDB:
         return None
 
     def _parse_row(self, row: tuple) -> Dict[str, Any]:
-        """Parse tuple row từ sqlite sang Dictionary."""
-        # Col mapping: id(0), video_id(1), shot_id(2), frame_type(3), frame_idx(4), timestamp_ms(5), frame_path(6), ocr_text(7), asr_text(8), detected_objects(9), context_summary(10)
+        """Parse database row tuple into a dictionary mapping."""
         return {
             "id": row[0],
             "video_id": row[1],

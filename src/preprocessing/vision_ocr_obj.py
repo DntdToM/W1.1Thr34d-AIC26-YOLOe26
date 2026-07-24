@@ -1,4 +1,4 @@
-"""Vision Analytics Module (YOLOv9 & EasyOCR / PaddleOCR + Window-Based LLM Context Summarization)"""
+"""Vision analytics module for object detection, OCR extraction, and window-based LLM context summarization."""
 
 import os
 import time
@@ -41,7 +41,7 @@ COCO_VI_MAP = {
 
 
 def _clean_llm_response(text: str) -> str:
-    """Loại bỏ các câu chào hỏi/lời dẫn thừa và định dạng markdown rác từ phản hồi LLM."""
+    """Sanitize LLM output by removing intro phrases and markdown list formatting."""
     if not text:
         return ""
     lines = [line.strip() for line in text.split("\n") if line.strip()]
@@ -62,14 +62,10 @@ def _clean_llm_response(text: str) -> str:
 
 
 def call_groq_api(prompt: str, groq_key: str, model_name: str = "llama-3.1-8b-instant") -> Optional[str]:
-    """
-    Gọi Groq API hỗ trợ xoay vòng nhiều API Keys (phân cách bởi dấu phẩy).
-    Sử dụng mô hình Llama-3.1-8B-Instant (14.4k RPD / 500k TPD) siêu tốc > 800 tokens/sec.
-    """
+    """Execute Groq API request with multi-key rotation support."""
     if not groq_key or groq_key == "YOUR_GROQ_API_KEY_HERE":
         return None
 
-    # Tách danh sách keys nếu truyền nhiều keys (ví dụ: "gsk_1,gsk_2,gsk_3")
     keys_list = [k.strip() for k in groq_key.split(",") if k.strip() and k.strip() != "YOUR_GROQ_API_KEY_HERE"]
     if not keys_list:
         return None
@@ -86,7 +82,6 @@ def call_groq_api(prompt: str, groq_key: str, model_name: str = "llama-3.1-8b-in
     )
 
     for active_key in keys_list:
-        # 1. Thử dùng thư viện groq chính thức nếu có
         try:
             from groq import Groq
             client = Groq(api_key=active_key)
@@ -103,12 +98,11 @@ def call_groq_api(prompt: str, groq_key: str, model_name: str = "llama-3.1-8b-in
                 res_text = completion.choices[0].message.content.strip()
                 if res_text:
                     cleaned_out = _clean_llm_response(res_text)
-                    logger.info(f"Đã phản hồi thành công từ Groq SDK ({model_name}).")
+                    logger.info(f"Groq SDK call successful ({model_name}).")
                     return cleaned_out
         except Exception:
             pass
 
-        # 2. Fallback sang REST API thuần (không cần pip install groq)
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {active_key}",
@@ -132,22 +126,19 @@ def call_groq_api(prompt: str, groq_key: str, model_name: str = "llama-3.1-8b-in
                     res_text = choices[0]["message"].get("content", "").strip()
                     if res_text:
                         cleaned_out = _clean_llm_response(res_text)
-                        logger.info(f"Đã phản hồi thành công từ Groq REST API ({model_name}).")
+                        logger.info(f"Groq REST API call successful ({model_name}).")
                         return cleaned_out
             elif res.status_code == 429:
-                logger.warning(f"Groq Key ({active_key[:8]}...) dính rate-limit (429). Chuyển sang Key kế tiếp...")
+                logger.warning(f"Groq API Key rate-limited (429). Rotating to next key...")
                 continue
         except Exception as e:
-            logger.warning(f"Lỗi khi gọi Groq REST API ({model_name}): {e}")
+            logger.warning(f"Groq REST API execution error ({model_name}): {e}")
 
     return None
 
 
 def call_gemini_api(prompt: str, gemini_key: str) -> Optional[str]:
-    """
-    Gọi REST API của Google Gemini Flash (`gemini-flash-latest`).
-    Tự động chèn delay 4s sau mỗi lần gọi thành công để tuân thủ rate-limit Free Tier (15 req/min).
-    """
+    """Execute Google Gemini Flash REST API request with automated rate-limit delay."""
     if not gemini_key or gemini_key == "YOUR_GEMINI_API_KEY_HERE":
         return None
         
@@ -168,24 +159,21 @@ def call_gemini_api(prompt: str, gemini_key: str) -> Optional[str]:
                     parts = candidates[0]["content"].get("parts", [])
                     if parts and "text" in parts[0]:
                         text_out = parts[0]["text"].strip()
-                        logger.info(f"Đã phản hồi thành công từ Gemini API ({model_name}).")
-                        # Rate-limit: chờ 4s giữa các request để không bị Gemini Free Tier chặn
+                        logger.info(f"Gemini API call successful ({model_name}).")
                         time.sleep(4)
                         return text_out
             elif res.status_code == 429:
-                logger.warning(f"Gemini API rate-limited (429). Chờ 10s rồi thử lại...")
+                logger.warning(f"Gemini API rate-limited (429). Pausing for 10s...")
                 time.sleep(10)
                 continue
         except Exception as e:
-            logger.warning(f"Lỗi khi gọi Gemini API ({model_name}): {e}")
+            logger.warning(f"Gemini API execution error ({model_name}): {e}")
             
     return None
 
 
 def correct_ocr_text(raw_text: str, config_path: str = "config.yaml") -> str:
-    """
-    Sửa lỗi chính tả & khôi phục dấu tiếng Việt cho chuỗi OCR thô bằng Groq Multi-Keys / Gemini Flash API xoay vòng.
-    """
+    """Correct Vietnamese OCR text using Groq or Gemini Flash API rotation."""
     if not raw_text or not raw_text.strip():
         return ""
 
@@ -205,15 +193,12 @@ def correct_ocr_text(raw_text: str, config_path: str = "config.yaml") -> str:
     groq_model = llm_cfg.get("groq_model", "llama-3.1-8b-instant")
     gemini_key = os.getenv("GEMINI_API_KEY") or llm_cfg.get("gemini_api_key", "")
 
-    # Vòng lặp xoay vòng liên tục tối đa 3 lượt (Groq Multi-Keys -> Gemini -> Retry)
     for attempt in range(3):
-        # 1. Thử xoay vòng qua danh sách Groq API Keys (Llama 3.1 8B Instant)
         if groq_key and groq_key != "YOUR_GROQ_API_KEY_HERE":
             groq_res = call_groq_api(prompt, groq_key, model_name=groq_model)
             if groq_res:
                 return groq_res
 
-        # 2. Nếu tất cả Groq Keys bị 429 -> Chuyển qua Gemini Flash API
         if gemini_key and gemini_key != "YOUR_GEMINI_API_KEY_HERE":
             gemini_res = call_gemini_api(prompt, gemini_key)
             if gemini_res:
@@ -225,10 +210,7 @@ def correct_ocr_text(raw_text: str, config_path: str = "config.yaml") -> str:
 
 
 def summarize_window_with_llm(window_data_str: str, config_path: str = "config.yaml") -> str:
-    """
-    Vòng lặp xoay vòng liên tục giữa Groq Multi-Keys (Llama 3.1 8B Instant) và Gemini Flash API.
-    ĐÚNG 1 LẦN cho mỗi batch 90s để tối ưu 98% số lần gọi API.
-    """
+    """Generate concise scene context summary for a temporal window batch via LLM providers."""
     if not window_data_str or not window_data_str.strip():
         return ""
 
@@ -245,36 +227,26 @@ def summarize_window_with_llm(window_data_str: str, config_path: str = "config.y
     groq_model = llm_cfg.get("groq_model", "llama-3.1-8b-instant")
     gemini_key = os.getenv("GEMINI_API_KEY") or llm_cfg.get("gemini_api_key", "")
 
-    # Vòng lặp xoay vòng liên tục tối đa 3 lượt (Groq Multi-Keys -> Gemini -> Retry)
     for attempt in range(3):
-        # 1. Thử xoay vòng qua danh sách Groq API Keys (Llama 3.1 8B Instant)
         if groq_key and groq_key != "YOUR_GROQ_API_KEY_HERE":
             groq_res = call_groq_api(prompt, groq_key, model_name=groq_model)
             if groq_res:
                 return groq_res
 
-        # 2. Nếu tất cả Groq Keys bị Rate-Limit (429) -> Nhảy sang Gemini Flash API
         if gemini_key and gemini_key != "YOUR_GEMINI_API_KEY_HERE":
-            logger.info("Chuyển sang thử Gemini Flash API...")
+            logger.info("Failing over to Gemini Flash API...")
             gemini_res = call_gemini_api(prompt, gemini_key)
             if gemini_res:
                 return gemini_res
 
-        # 3. Nếu cả 4 Groq Keys và Gemini đều dính 429, chờ 4s rồi lặp lại xoay vòng lượt tiếp theo
-        logger.warning(f"[Lượt xoay vòng {attempt + 1}/3] Cả Groq Multi-Keys và Gemini đều bị Rate-Limit. Chờ 4s rồi xoay vòng lại...")
+        logger.warning(f"Provider rotation attempt {attempt + 1}/3 rate-limited. Retrying in 4s...")
         time.sleep(4)
 
     return window_data_str.strip()
 
 
 def window_based_summarize(frames_data: List[Dict[str, Any]], window_size: Optional[int] = None, config_path: str = "config.yaml") -> List[Dict[str, Any]]:
-    """
-    HÀM HẬU XỬ LÝ LLM THEO CỬA SỔ (WINDOW-BASED) + BATCHING:
-    1. Gom nhóm (batching) dữ liệu thô của tất cả frames trong cùng cửa sổ 30 giây.
-    2. GỘP 3 cửa sổ liên tiếp thành 1 batch (~90s) → gọi Gemini ĐÚNG 1 LẦN cho batch đó.
-       Giảm 3x số lần gọi API, tuân thủ Gemini Free Tier rate-limit (15 req/min).
-    3. Gắn chuỗi metadata tổng hợp vào trường `context_summary` cho tất cả frames thuộc batch.
-    """
+    """Group keyframe analytics into temporal window batches and attach LLM context summaries."""
     if not frames_data:
         return []
 
@@ -282,12 +254,9 @@ def window_based_summarize(frames_data: List[Dict[str, Any]], window_size: Optio
     if window_size is None:
         window_size = config.get("preprocessing", {}).get("video", {}).get("window_size", 30)
     
-    # Số cửa sổ gộp thành 1 batch LLM call (mặc định 3 → 90s/call)
     batch_windows = config.get("preprocessing", {}).get("video", {}).get("batch_windows", 3)
-
     window_ms = window_size * 1000
     
-    # 1. Nhóm các frames theo window index (30s / cửa sổ)
     windows: Dict[int, List[Dict[str, Any]]] = {}
     for frame in frames_data:
         ts_ms = frame.get("timestamp_ms", 0)
@@ -296,7 +265,6 @@ def window_based_summarize(frames_data: List[Dict[str, Any]], window_size: Optio
             windows[win_idx] = []
         windows[win_idx].append(frame)
 
-    # 2. Gộp batch_windows cửa sổ liên tiếp → 1 LLM call
     sorted_win_indices = sorted(windows.keys())
     total_batches = (len(sorted_win_indices) + batch_windows - 1) // batch_windows
     
@@ -304,7 +272,6 @@ def window_based_summarize(frames_data: List[Dict[str, Any]], window_size: Optio
         batch_indices = sorted_win_indices[batch_i:batch_i + batch_windows]
         batch_num = batch_i // batch_windows + 1
         
-        # Gom dữ liệu từ tất cả cửa sổ trong batch
         batch_start_sec = batch_indices[0] * window_size
         batch_end_sec = (batch_indices[-1] + 1) * window_size
         batch_frames = []
@@ -336,7 +303,7 @@ def window_based_summarize(frames_data: List[Dict[str, Any]], window_size: Optio
             f"Văn bản OCR đọc được: {' | '.join(unique_ocr) if unique_ocr else 'Không có'}."
         )
 
-        logger.info(f"Đang tổng hợp LLM Context batch {batch_num}/{total_batches} [{batch_start_sec}s - {batch_end_sec}s] ({len(batch_frames)} frames)...")
+        logger.info(f"Summarizing LLM context batch {batch_num}/{total_batches} [{batch_start_sec}s - {batch_end_sec}s] ({len(batch_frames)} frames)...")
         context_summary = summarize_window_with_llm(window_data_str, config_path=config_path)
 
         for f in batch_frames:
@@ -346,9 +313,7 @@ def window_based_summarize(frames_data: List[Dict[str, Any]], window_size: Optio
 
 
 class VisionAnalytics:
-    """
-    Module xử lý thị giác độc lập: YOLOv9-small nhận diện vật thể và EasyOCR / PaddleOCR đọc chữ tiếng Việt.
-    """
+    """Object detection via YOLOv9 and Vietnamese OCR text extraction via EasyOCR / PaddleOCR."""
 
     def __init__(self, config_path: str = "config.yaml"):
         self.config_path = config_path
@@ -367,38 +332,35 @@ class VisionAnalytics:
         self._init_ocr_engines()
 
     def _init_yolo(self) -> Optional[Any]:
-        """Khởi tạo mô hình YOLOv9-small từ ultralytics."""
+        """Initialize YOLOv9 model object from ultralytics library."""
         try:
             from ultralytics import YOLO
             model = YOLO(self.yolo_model_path)
-            logger.info(f"Đã nạp mô hình YOLOv9 từ {self.yolo_model_path} thành công.")
+            logger.info(f"YOLOv9 model loaded successfully from '{self.yolo_model_path}'.")
             return model
         except Exception as e:
-            logger.error(f"Không thể khởi tạo YOLOv9 ({self.yolo_model_path}): {e}")
+            logger.error(f"YOLOv9 initialization failed from '{self.yolo_model_path}': {e}")
             return None
 
     def _init_ocr_engines(self):
-        """Khởi tạo EasyOCR (PyTorch Native, cực kỳ ổn định) và PaddleOCR."""
+        """Initialize EasyOCR and PaddleOCR engines."""
         try:
             import easyocr
             gpu = torch.cuda.is_available()
             self.easyocr_reader = easyocr.Reader(['vi', 'en'], gpu=gpu)
-            logger.info(f"Đã nạp EasyOCR (languages=['vi', 'en'], gpu={gpu}) thành công.")
+            logger.info(f"EasyOCR reader initialized (languages=['vi', 'en'], gpu={gpu}).")
         except Exception as e:
-            logger.warning(f"Không thể nạp EasyOCR: {e}")
+            logger.warning(f"EasyOCR initialization failed: {e}")
 
         try:
             from paddleocr import PaddleOCR
             self.paddleocr_engine = PaddleOCR(use_angle_cls=False, lang=self.ocr_lang, show_log=False)
-            logger.info(f"Đã nạp PaddleOCR (lang={self.ocr_lang}) thành công.")
+            logger.info(f"PaddleOCR engine initialized (lang={self.ocr_lang}).")
         except Exception as e:
-            logger.info(f"PaddleOCR chưa có sẵn: {e}")
+            logger.info(f"PaddleOCR engine unavailable: {e}")
 
     def detect_objects(self, frame_path: str) -> List[str]:
-        """
-        Sử dụng YOLOv9-small nhận diện đối tượng độc lập cho 1 khung hình.
-        (Đã bỏ tham số 'half' để không bắn warning).
-        """
+        """Perform object detection on a frame image using YOLOv9."""
         if self.yolo_model is None:
             return []
 
@@ -415,17 +377,13 @@ class VisionAnalytics:
             unique_classes = list(set(detected_classes))
             return unique_classes
         except Exception as e:
-            logger.error(f"Lỗi khi chạy YOLOv9 nhận diện đối tượng trên {frame_path}: {e}")
+            logger.error(f"YOLOv9 object detection error on '{frame_path}': {e}")
             return []
 
     def extract_ocr_raw(self, frame_path: str) -> str:
-        """
-        Đọc văn bản thô độc lập cho 1 khung hình.
-        Sử dụng EasyOCR detail=0 (PyTorch Native) 100% không bao giờ bị lỗi unpack tuple.
-        """
+        """Extract raw OCR text from a frame image using EasyOCR or PaddleOCR."""
         lines = []
 
-        # 1. Thử EasyOCR với detail=0 (Trả về danh sách chuỗi chữ trực tiếp, an toàn tuyệt đối)
         if self.easyocr_reader is not None:
             try:
                 results = self.easyocr_reader.readtext(frame_path, detail=0)
@@ -434,9 +392,8 @@ class VisionAnalytics:
                     if lines:
                         return " ".join(lines)
             except Exception as e:
-                logger.warning(f"Lỗi EasyOCR trên {frame_path}: {e}")
+                logger.warning(f"EasyOCR extraction error on '{frame_path}': {e}")
 
-        # 2. Fallback PaddleOCR nếu EasyOCR chưa đọc được
         if self.paddleocr_engine is not None:
             try:
                 result = self.paddleocr_engine.ocr(frame_path, cls=False)
@@ -455,16 +412,14 @@ class VisionAnalytics:
                     if lines:
                         return " ".join(lines)
             except Exception as e:
-                logger.warning(f"Lỗi PaddleOCR trên {frame_path}: {e}")
+                logger.warning(f"PaddleOCR extraction error on '{frame_path}': {e}")
 
         return " ".join(lines)
 
     def analyze_frame(self, frame_path: str) -> Dict[str, Any]:
-        """
-        Trích xuất đặc trưng độc lập cho 1 frame duy nhất (objects & ocr_raw).
-        """
+        """Extract object detection and OCR text features for a single keyframe."""
         if not os.path.exists(frame_path):
-            logger.error(f"File khung hình không tồn tại: {frame_path}")
+            logger.error(f"Frame image file not found: {frame_path}")
             return {
                 "frame_path": frame_path,
                 "objects": [],
@@ -474,8 +429,6 @@ class VisionAnalytics:
 
         objects = self.detect_objects(frame_path)
         ocr_raw = self.extract_ocr_raw(frame_path)
-        # Không gọi LLM riêng lẻ cho từng frame để tránh spam API.
-        # Việc sửa chính tả & tóm tắt được gộp 90s/1 LLM call ở window_based_summarize()
         ocr_fixed = ocr_raw
 
         return {
@@ -494,9 +447,8 @@ def process_single_frame(frame_path: str) -> Dict[str, Any]:
 if __name__ == "__main__":
     import sys
     test_path = sys.argv[1] if len(sys.argv) > 1 else "processed_data/1_frames/test_transnet_shot_0001_sharpest.jpg"
-    print(f"Chạy thử nghiệm VisionAnalytics với frame: {test_path}")
     if os.path.exists(test_path):
         res = process_single_frame(test_path)
-        print("Kết quả:", res)
+        print("Analysis Result:", res)
     else:
-        print("Không tìm thấy file ảnh test.")
+        print("Test image file does not exist.")

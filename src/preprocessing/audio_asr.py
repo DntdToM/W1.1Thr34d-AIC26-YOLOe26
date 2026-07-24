@@ -1,8 +1,4 @@
-"""
-Audio Processing & Speech-to-Text Module (Silero VAD & PhoWhisper + FP16 Precision)
-Tách kênh audio mono 16kHz bằng ffmpeg / imageio-ffmpeg, lọc khoảng lặng bằng Silero VAD / scipy 
-và chuyển đổi voice-to-text bằng PhoWhisper Small (kèm FP16 Quantization) via transformers.
-"""
+"""Audio processing and speech-to-text module using Silero VAD and PhoWhisper ASR."""
 
 import os
 import tempfile
@@ -26,7 +22,7 @@ def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
 
 
 def format_timestamp(ms: int) -> str:
-    """Format milliseconds sang định dạng hh:mm:ss.mmm"""
+    """Format millisecond integer into hh:mm:ss.mmm string representation."""
     seconds, milliseconds = divmod(ms, 1000)
     minutes, seconds = divmod(seconds, 60)
     hours, minutes = divmod(minutes, 60)
@@ -34,7 +30,7 @@ def format_timestamp(ms: int) -> str:
 
 
 def read_wav_file_fallback(wav_path: str, target_sr: int = 16000) -> np.ndarray:
-    """Đọc file WAV bằng scipy.io.wavfile hoàn toàn thuần Python mà không cần torchaudio."""
+    """Read mono WAV audio file into float32 numpy array using scipy."""
     try:
         sr, data = wavfile.read(wav_path)
         if data.ndim > 1:
@@ -49,17 +45,12 @@ def read_wav_file_fallback(wav_path: str, target_sr: int = 16000) -> np.ndarray:
             audio = data.astype(np.float32)
         return audio
     except Exception as e:
-        logger.error(f"Không thể đọc file WAV {wav_path}: {e}")
+        logger.error(f"Failed to read WAV audio file '{wav_path}': {e}")
         return np.array([], dtype=np.float32)
 
 
 class AudioASRProcessor:
-    """
-    Xử lý âm thanh từ video: 
-    1. Tách audio mono 16kHz bằng ffmpeg / imageio-ffmpeg.
-    2. Lọc đoạn chứa giọng nói bằng Silero VAD / Chunking.
-    3. Nhận diện giọng nói bằng PhoWhisper Small (chế độ FP16 trên GPU).
-    """
+    """Audio extraction, Voice Activity Detection (VAD), and automatic speech recognition processor."""
 
     def __init__(self, config_path: str = "config.yaml"):
         self.config = load_config(config_path)
@@ -76,19 +67,19 @@ class AudioASRProcessor:
         self.ffmpeg_exe = self._find_ffmpeg_executable()
 
     def _find_ffmpeg_executable(self) -> str:
-        """Tìm file thực thi ffmpeg (Ưu tiên imageio_ffmpeg bundled binary, fallback 'ffmpeg')."""
+        """Locate ffmpeg binary path prioritizing imageio_ffmpeg bundled executable."""
         try:
             import imageio_ffmpeg
             exe = imageio_ffmpeg.get_ffmpeg_exe()
             if os.path.exists(exe):
-                logger.info(f"Sử dụng bundled ffmpeg binary: {exe}")
+                logger.info(f"Using bundled ffmpeg binary at '{exe}'")
                 return exe
         except Exception:
             pass
         return "ffmpeg"
 
     def _init_silero_vad(self) -> bool:
-        """Khởi tạo mô hình Silero VAD từ torch.hub."""
+        """Initialize Silero VAD model via torch.hub."""
         if self.vad_model is None:
             try:
                 model, utils = torch.hub.load(
@@ -99,15 +90,15 @@ class AudioASRProcessor:
                 )
                 self.vad_model = model
                 self.vad_utils = utils
-                logger.info("Đã nạp mô hình Silero VAD thành công.")
+                logger.info("Silero VAD model loaded successfully.")
                 return True
             except Exception as e:
-                logger.warning(f"Không thể nạp mô hình Silero VAD ({e}). Sẽ tự động dùng Chunking VAD Fallback.")
+                logger.warning(f"Silero VAD loading failed ({e}). Falling back to uniform 5s chunking.")
                 return False
         return True
 
     def _init_phowhisper(self):
-        """Khởi tạo mô hình PhoWhisper Small với FP16 precision."""
+        """Initialize PhoWhisper ASR pipeline."""
         if self.asr_pipeline is None:
             try:
                 try:
@@ -123,15 +114,13 @@ class AudioASRProcessor:
                     torch_dtype=torch_dtype,
                     device=device
                 )
-                logger.info(f"Đã nạp mô hình PhoWhisper ({self.phowhisper_model_name}, dtype={torch_dtype}) thành công.")
+                logger.info(f"PhoWhisper model '{self.phowhisper_model_name}' loaded successfully (dtype={torch_dtype}).")
             except Exception as e:
-                logger.error(f"Không thể nạp mô hình PhoWhisper ({self.phowhisper_model_name}): {e}")
+                logger.error(f"PhoWhisper initialization failed for '{self.phowhisper_model_name}': {e}")
                 raise e
 
     def extract_audio_ffmpeg(self, video_path: str, output_wav_path: str) -> bool:
-        """
-        Tách kênh audio từ video gốc sang mono 16kHz WAV bằng ffmpeg / imageio-ffmpeg.
-        """
+        """Extract mono 16kHz WAV audio stream from video container via ffmpeg."""
         cmd = [
             self.ffmpeg_exe,
             "-y",
@@ -145,14 +134,11 @@ class AudioASRProcessor:
             res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
             return os.path.exists(output_wav_path) and os.path.getsize(output_wav_path) > 1000
         except Exception as e:
-            logger.warning(f"Không thể tách audio từ video {video_path} (Video có thể không chứa kênh âm thanh): {e}")
+            logger.warning(f"Audio extraction failed for video '{video_path}' (stream may be absent): {e}")
             return False
 
     def get_speech_timestamps_vad(self, wav_path: str, audio_np: np.ndarray) -> List[Dict[str, int]]:
-        """
-        Sử dụng Silero VAD tìm các phân đoạn có giọng nói (start_ms, end_ms).
-        Nút thắt tự động Fallback sang Chunking 5s nếu Silero VAD không khả dụng.
-        """
+        """Detect speech segments using Silero VAD with uniform chunking fallback."""
         has_silero = self._init_silero_vad()
         
         if has_silero and self.vad_utils is not None:
@@ -180,12 +166,11 @@ class AudioASRProcessor:
                         "end_sample": end_sample
                     })
 
-                logger.info(f"Silero VAD phát hiện {len(segments)} phân đoạn giọng nói.")
+                logger.info(f"Silero VAD detected {len(segments)} speech segments.")
                 return segments
             except Exception as e:
-                logger.warning(f"Lỗi khi chạy Silero VAD ({e}). Chuyển sang Chunking Fallback.")
+                logger.warning(f"Silero VAD execution failed ({e}). Reverting to fallback chunking.")
 
-        # Chunking Fallback: Chia audio thành từng phân đoạn 5 giây
         chunk_sec = 5.0
         chunk_samples = int(chunk_sec * self.sample_rate)
         total_samples = len(audio_np)
@@ -204,19 +189,13 @@ class AudioASRProcessor:
                 "end_sample": end_sample
             })
 
-        logger.info(f"Chunking Fallback phân tách {len(segments)} phân đoạn audio (5s/chunk).")
+        logger.info(f"Fallback chunking partitioned audio into {len(segments)} segments (5s interval).")
         return segments
 
     def process_audio(self, video_path: str) -> Dict[str, str]:
-        """
-        Hàm chính: 
-        - Tách audio mono 16kHz
-        - Tìm phân đoạn giọng nói bằng Silero VAD / Chunking Fallback
-        - Transcribe bằng PhoWhisper Small via transformers
-        - Trả về dictionary map giữa timestamp của shot/đoạn giọng nói và nội dung text tương ứng.
-        """
+        """Extract audio stream, perform VAD segmentation, run ASR transcription, and return timestamp-text mappings."""
         if not os.path.exists(video_path):
-            logger.error(f"Tệp video không tồn tại: {video_path}")
+            logger.error(f"Video file not found: {video_path}")
             return {}
 
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_wav:
@@ -225,27 +204,22 @@ class AudioASRProcessor:
         timestamp_text_map = {}
 
         try:
-            # 1. Tách kênh audio mono 16kHz
             has_audio = self.extract_audio_ffmpeg(video_path, temp_wav_path)
             if not has_audio or not os.path.exists(temp_wav_path) or os.path.getsize(temp_wav_path) <= 1000:
-                logger.info(f"Video {video_path} không có âm thanh hoặc file audio rỗng.")
+                logger.info(f"Video file '{video_path}' contains no audio track or empty audio stream.")
                 return {}
 
-            # 2. Đọc file WAV bằng scipy.io.wavfile
             audio_np = read_wav_file_fallback(temp_wav_path, target_sr=self.sample_rate)
             if len(audio_np) == 0:
                 return {}
 
-            # 3. Tìm các phân đoạn có giọng nói qua Silero VAD hoặc Chunking Fallback
             speech_segments = self.get_speech_timestamps_vad(temp_wav_path, audio_np)
             if not speech_segments:
-                logger.info("Không phát hiện phân đoạn lời nói nào trong video.")
+                logger.info(f"No speech segments detected in video: {video_path}")
                 return {}
 
-            # 4. Nạp PhoWhisper Small ASR Pipeline
             self._init_phowhisper()
 
-            # 5. Transcribe từng đoạn giọng nói
             for seg in speech_segments:
                 start_ms = seg["start_ms"]
                 end_ms = seg["end_ms"]
@@ -264,18 +238,18 @@ class AudioASRProcessor:
                     )
                     text_content = asr_result.get("text", "").strip()
                 except Exception as e:
-                    logger.warning(f"Lỗi khi transcribe đoạn {start_ms}-{end_ms}ms: {e}")
+                    logger.warning(f"Transcription failed for audio interval {start_ms}-{end_ms}ms: {e}")
                     text_content = ""
 
                 if text_content:
                     ts_key = f"{format_timestamp(start_ms)} - {format_timestamp(end_ms)}"
                     timestamp_text_map[ts_key] = text_content
 
-            logger.info(f"Đã hoàn thành ASR cho {len(timestamp_text_map)} phân đoạn.")
+            logger.info(f"ASR transcription completed for {len(timestamp_text_map)} audio segments.")
             return timestamp_text_map
 
         except Exception as e:
-            logger.error(f"[XỬ LÝ LỖI] Lỗi bóc tách ASR âm thanh {video_path}: {e}")
+            logger.error(f"Audio ASR pipeline failed for video '{video_path}': {e}")
             return {}
 
         finally:
@@ -291,9 +265,8 @@ def process_video_audio(video_path: str) -> Dict[str, str]:
 if __name__ == "__main__":
     import sys
     test_video = sys.argv[1] if len(sys.argv) > 1 else "data/dummy_videos/test_transnet.mp4"
-    print(f"Chạy thử nghiệm AudioASRProcessor với video: {test_video}")
     if os.path.exists(test_video):
         res_map = process_video_audio(test_video)
-        print("Kết quả ASR Map:", res_map)
+        print("ASR Map Result:", res_map)
     else:
-        print("Tệp video test không tồn tại.")
+        print("Test video file does not exist.")

@@ -1,7 +1,4 @@
-"""
-FAISS Vector Index Management & Global Indexing Script
-Quản lý chỉ mục Vector Search độ trễ mili-giây và quét/gộp toàn bộ các file .npy embeddings ra faiss_index.bin.
-"""
+"""FAISS Vector Index Management & Global Indexing Script."""
 
 import os
 import glob
@@ -24,9 +21,7 @@ def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
 
 
 class VectorDB:
-    """
-    FAISS Index Wrapper phục vụ truy xuất vector siêu tốc.
-    """
+    """FAISS Index wrapper for vector similarity search."""
 
     def __init__(self, dimension: int = 768, metric_type: str = "COSINE", config_path: str = "config.yaml"):
         self.config = load_config(config_path)
@@ -36,18 +31,17 @@ class VectorDB:
         self.index_path = self.config.get("paths", {}).get("faiss_index_path", "processed_data/2_embeddings/faiss_index.bin")
         self.mapping_path = os.path.join(os.path.dirname(self.index_path), "faiss_mapping.json")
 
-        self.index = faiss.IndexFlatIP(self.dimension)  # Inner Product for Cosine Similarity on normalized vectors
+        self.index = faiss.IndexFlatIP(self.dimension)
         self.mapping: List[Dict[str, Any]] = []
 
         if os.path.exists(self.index_path) and os.path.exists(self.mapping_path):
             self.load_index(self.index_path, self.mapping_path)
 
     def add_vectors(self, vectors: np.ndarray, metadata_list: Optional[List[Dict[str, Any]]] = None):
-        """Thêm danh sách vector và metadata vào index."""
+        """Add normalized feature vectors and metadata mappings into FAISS index."""
         if vectors is None or vectors.size == 0:
             return
 
-        # Ensure float32 and L2 normalization
         vectors = vectors.astype(np.float32)
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
@@ -62,7 +56,7 @@ class VectorDB:
             self.mapping.extend(metadata_list)
 
     def search(self, query_vector: np.ndarray, top_k: int = 100) -> Tuple[np.ndarray, np.ndarray]:
-        """Truy vấn Top-K kết quả tương đồng nhất."""
+        """Query Top-K most similar vectors via Inner Product similarity."""
         query_vector = query_vector.astype(np.float32).reshape(1, -1)
         norm = np.linalg.norm(query_vector)
         if norm > 0:
@@ -76,10 +70,7 @@ class VectorDB:
         return distances[0], indices[0]
 
     def search_with_metadata(self, query_vector: np.ndarray, top_k: int = 100) -> List[Dict[str, Any]]:
-        """
-        Truy vấn Top-K kết quả và khớp trực tiếp với metadata mapping.
-        Trả về danh sách candidates dictionary kèm điểm số `score`.
-        """
+        """Query Top-K results and return mapped metadata dictionaries with relevance scores."""
         distances, indices = self.search(query_vector, top_k=top_k)
         results = []
         
@@ -93,7 +84,7 @@ class VectorDB:
         return results
 
     def save_index(self, index_path: Optional[str] = None, mapping_path: Optional[str] = None):
-        """Lưu index ra file bin và mapping ra file json."""
+        """Persist FAISS index binary and metadata mapping JSON file."""
         idx_p = index_path or self.index_path
         map_p = mapping_path or self.mapping_path
         
@@ -103,21 +94,21 @@ class VectorDB:
         with open(map_p, "w", encoding="utf-8") as f:
             json.dump(self.mapping, f, ensure_ascii=False, indent=2)
             
-        logger.info(f"Đã lưu FAISS Index ({self.index.ntotal} vectors) tại: {idx_p}")
+        logger.info(f"FAISS index saved successfully ({self.index.ntotal} vectors) to '{idx_p}'.")
 
     def load_index(self, index_path: Optional[str] = None, mapping_path: Optional[str] = None):
-        """Đọc index từ file bin và mapping từ file json."""
+        """Load FAISS index binary and metadata mapping JSON file."""
         idx_p = index_path or self.index_path
         map_p = mapping_path or self.mapping_path
         
         if os.path.exists(idx_p):
             self.index = faiss.read_index(idx_p)
-            logger.info(f"Đã nạp FAISS Index từ {idx_p} ({self.index.ntotal} vectors).")
+            logger.info(f"FAISS index loaded from '{idx_p}' ({self.index.ntotal} vectors).")
             
         if os.path.exists(map_p):
             with open(map_p, "r", encoding="utf-8") as f:
                 self.mapping = json.load(f)
-            logger.info(f"Đã nạp FAISS Mapping từ {map_p} ({len(self.mapping)} entries).")
+            logger.info(f"FAISS metadata mapping loaded from '{map_p}' ({len(self.mapping)} entries).")
 
 
 def build_global_index(
@@ -125,18 +116,12 @@ def build_global_index(
     metadata_dir: str = "processed_data/3_metadata",
     index_output_path: str = "processed_data/2_embeddings/faiss_index.bin"
 ) -> VectorDB:
-    """
-    KỊCH BẢN TỔNG HỢP FAISS GLOBAL INDEXING (100% Complete Implementation):
-    - Quét toàn bộ file *_img_emb.npy trong thư mục embeddings_dir.
-    - Gom nhóm ma trận bằng np.vstack().
-    - Khớp chi tiết metadata từng keyframe từ các file *_metadata.json trong metadata_dir.
-    - Đưa vào faiss.IndexFlatIP và lưu ra faiss_index.bin.
-    """
-    logger.info("=== BẮT ĐẦU TẠO FAISS GLOBAL INDEX ===")
+    """Consolidate embedding matrices and build a unified global FAISS index."""
+    logger.info("=== STARTING GLOBAL FAISS INDEXING ===")
     img_emb_files = sorted(glob.glob(os.path.join(embeddings_dir, "*_img_emb.npy")))
 
     if not img_emb_files:
-        logger.warning(f"Không tìm thấy file *_img_emb.npy nào trong '{embeddings_dir}'.")
+        logger.warning(f"No *_img_emb.npy files detected in '{embeddings_dir}'.")
         vdb = VectorDB(dimension=768)
         return vdb
 
@@ -148,7 +133,7 @@ def build_global_index(
         meta_json_path = os.path.join(metadata_dir, f"{video_name}_metadata.json")
 
         if not os.path.exists(meta_json_path):
-            logger.warning(f"Không tìm thấy file metadata {meta_json_path} cho {video_name}. Bỏ qua.")
+            logger.warning(f"Metadata file '{meta_json_path}' not found for video '{video_name}'. Skipping.")
             continue
 
         try:
@@ -159,7 +144,7 @@ def build_global_index(
             keyframes = meta_json.get("keyframes", [])
             
             if len(vecs) != len(keyframes):
-                logger.warning(f"Mismatch số lượng vector ({len(vecs)}) và keyframes ({len(keyframes)}) cho {video_name}.")
+                logger.warning(f"Vector count ({len(vecs)}) and keyframe metadata count ({len(keyframes)}) mismatch for video '{video_name}'.")
 
             all_vectors.append(vecs)
             
@@ -178,17 +163,16 @@ def build_global_index(
                 })
 
         except Exception as e:
-            logger.error(f"Lỗi khi xử lý file embedding {emb_file}: {e}")
+            logger.error(f"Error processing embedding file '{emb_file}': {e}")
 
     if not all_vectors:
-        logger.warning("Không gom được vector nào hợp lệ.")
+        logger.warning("No valid vectors aggregated for indexing.")
         return VectorDB(dimension=768)
 
-    # Gộp toàn bộ vector bằng np.vstack()
     stacked_vectors = np.vstack(all_vectors)
     dimension = stacked_vectors.shape[1]
 
-    logger.info(f"Đã gom tổng cộng {stacked_vectors.shape[0]} vectors (Dimension={dimension}). Nạp vào FAISS IndexFlatIP...")
+    logger.info(f"Aggregated {stacked_vectors.shape[0]} total vectors (dimension={dimension}). Adding to FAISS IndexFlatIP...")
 
     vector_db = VectorDB(dimension=dimension)
     vector_db.add_vectors(stacked_vectors, all_metadata)
@@ -196,7 +180,7 @@ def build_global_index(
     mapping_path = os.path.join(os.path.dirname(index_output_path), "faiss_mapping.json")
     vector_db.save_index(index_output_path, mapping_path)
     
-    logger.info("=== HOÀN THÀNH TẠO FAISS GLOBAL INDEX ===")
+    logger.info("=== GLOBAL FAISS INDEXING COMPLETE ===")
     return vector_db
 
 

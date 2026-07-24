@@ -1,10 +1,4 @@
-"""
-Video Segmentation Module (TransNet V2 & InfoShot + FP16 Precision)
-Phát hiện chuyển cảnh (Shot Boundary Detection) bằng TransNet V2 và trích xuất Keyframes (Common & Sharpest) bằng InfoShot.
-- BẮT BUỘC mô hình TransNet V2 (kèm cờ Quantization FP16 Half-Precision trên GPU).
-- Thuật toán InfoShot chuẩn: 2 frames/shot (Common & Sharpest đo bằng cv2.Laplacian(gray, cv2.CV_64F).var()).
-- Đặt tên file đầu ra: [video_name]_shot_[shot_id]_[common/sharpest].jpg
-"""
+"""Video segmentation module utilizing TransNetV2 and InfoShot keyframe extraction."""
 
 import os
 import cv2
@@ -26,10 +20,7 @@ def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
 
 
 def calculate_sharpness_laplacian(gray_frame: np.ndarray) -> float:
-    """
-    Đo độ sắc nét của khung hình bằng phương sai của thuật toán Laplacian:
-    cv2.Laplacian(gray, cv2.CV_64F).var()
-    """
+    """Calculate frame sharpness using the variance of Laplacian operator."""
     if gray_frame is None or gray_frame.size == 0:
         return 0.0
     try:
@@ -39,10 +30,7 @@ def calculate_sharpness_laplacian(gray_frame: np.ndarray) -> float:
 
 
 class VideoSegmenter:
-    """
-    Sử dụng BẮT BUỘC mô hình TransNet V2 để phân đoạn shot.
-    Trích xuất đúng 2 frames (common & sharpest) cho mỗi shot bằng thuật toán InfoShot.
-    """
+    """Shot boundary detection via TransNetV2 and keyframe extraction via InfoShot algorithm."""
 
     def __init__(self, config_path: str = "config.yaml"):
         self.config = load_config(config_path)
@@ -54,95 +42,74 @@ class VideoSegmenter:
         self.use_fp16 = self.config.get("preprocessing", {}).get("use_fp16", True)
         
         os.makedirs(self.output_dir, exist_ok=True)
-        
-        # BẮT BUỘC nạp TransNet V2 model. Không được có bất kỳ fallback nào.
         self.transnet_model = self._init_transnet_v2()
 
     def _init_transnet_v2(self) -> Any:
-        """
-        Khởi tạo mô hình TransNet V2 từ weights file (src/preprocessing/weights/transnetv2-pytorch-weights.pth)
-        hoặc gói thư viện transnetv2_pytorch.
-        NẾU KHÔNG TẢI ĐƯỢC WEIGHTS HOẶC THƯ VIỆN, QUĂNG LỖI (RAISE EXCEPTION) ĐỂ DỪNG CHƯƠNG TRÌNH NGAY LẬP TỨC.
-        VÔ HIỆU HÓA HOÀN TOÀN MỌI THUẬT TOÁN FALLBACK (HISTOGRAM / PIXEL DIFFERENCE).
-        """
+        """Initialize TransNetV2 model architecture from local weights or transnetv2_pytorch package."""
         try:
             from transnetv2_pytorch import TransNetV2
             
             if os.path.exists(self.weights_path):
-                logger.info(f"Đang nạp mô hình TransNetV2 từ local weights: '{self.weights_path}'...")
+                logger.info(f"Loading TransNetV2 model from local weights: '{self.weights_path}'")
                 try:
                     model = TransNetV2(model_path=self.weights_path)
                 except TypeError:
                     model = TransNetV2()
             else:
-                logger.info(f"Local weights '{self.weights_path}' chưa khởi tạo, nạp gói TransNetV2 PyTorch mặc định...")
+                logger.info(f"Local weights file '{self.weights_path}' not found. Initializing default TransNetV2 PyTorch model...")
                 model = TransNetV2()
 
             model.eval()
             if torch.cuda.is_available():
                 model = model.cuda()
-                logger.info("Đã khởi tạo mô hình TransNetV2 PyTorch (CUDA GPU) thành công.")
+                logger.info("TransNetV2 model initialized successfully on CUDA GPU.")
             else:
-                logger.info("Đã khởi tạo mô hình TransNetV2 PyTorch (CPU) thành công.")
+                logger.info("TransNetV2 model initialized successfully on CPU.")
             return model
 
         except Exception as e:
-            error_msg = (
-                f"CRITICAL ERROR: Không thể nạp mô hình TransNetV2! "
-                f"Kiểm tra file weights tại '{self.weights_path}' hoặc thư viện 'transnetv2-pytorch'. "
-                f"TẤT CẢ THUẬT TOÁN FALLBACK (Adaptive Histogram / Pixel Difference) ĐÃ BỊ VÔ HIỆU HÓA HOÀN TOÀN. "
-                f"Dừng chương trình ngay lập tức để tránh sinh ra keyframe rác. Lỗi chi tiết: {str(e)}"
-            )
+            error_msg = f"TransNetV2 model initialization failed from '{self.weights_path}': {str(e)}"
             logger.error(error_msg)
             raise Exception(error_msg)
 
     def predict_shot_boundaries(self, video_path: str) -> List[Tuple[int, int]]:
-        """
-        Dự đoán các điểm chuyển cảnh (shot boundaries) bằng TransNet V2 PyTorch.
-        Chia batch 1000 frames để tiết kiệm bộ nhớ RAM tuyệt đối.
-        Trả về danh sách tuple (start_frame, end_frame).
-        """
+        """Predict shot boundary frame indices using TransNetV2 PyTorch in mini-batches."""
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            raise ValueError(f"Không thể mở file video: {video_path}")
+            raise ValueError(f"Unable to open video file: {video_path}")
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         if total_frames <= 0:
             cap.release()
-            raise ValueError(f"Video {video_path} không chứa khung hình hợp lệ.")
+            raise ValueError(f"Video file contains invalid frame count: {video_path}")
 
         frames = []
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret or frame is None:
                 break
-            # TransNet V2 yêu cầu đầu vào ảnh RGB kích thước (27, 48)
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             resized = cv2.resize(rgb_frame, (48, 27))
             frames.append(resized)
         cap.release()
 
         if len(frames) == 0:
-            raise ValueError(f"Không đọc được khung hình nào từ video {video_path}")
+            raise ValueError(f"Failed to read any valid frames from video: {video_path}")
 
-        # Nếu video quá ngắn (< 10 frames), trả về 1 shot duy nhất thay vì đưa qua 3D Conv TransNetV2
         if len(frames) < 10:
-            logger.info(f"Video {video_path} quá ngắn ({len(frames)} frames), tự động coi là 1 shot duy nhất.")
+            logger.info(f"Short video detected ({len(frames)} frames). Defaulting to single shot segment.")
             return [(0, len(frames) - 1)]
 
-        # Dự đoán theo batch 1000 frames để tiết kiệm RAM
         batch_size = 1000
         predictions_list = []
 
         for i in range(0, len(frames), batch_size):
             chunk_frames = frames[i:i + batch_size]
             chunk_np = np.array(chunk_frames, dtype=np.uint8)
-            input_tensor = torch.from_numpy(chunk_np).unsqueeze(0)  # [1, T, 27, 48, 3] uint8
+            input_tensor = torch.from_numpy(chunk_np).unsqueeze(0)
 
-            # TransNetV2 BẮT BUỘC input dtype=uint8, shape [B, T, 27, 48, 3]
-            # Model tự convert sang float và chia 255 bên trong forward()
             if torch.cuda.is_available():
-                input_tensor = input_tensor.cuda()  # Giữ nguyên uint8, chỉ chuyển lên GPU
+                input_tensor = input_tensor.cuda()
 
             with torch.no_grad():
                 output = self.transnet_model(input_tensor)
@@ -171,16 +138,7 @@ class VideoSegmenter:
         return shots
 
     def infoshot_extract_keyframes(self, video_path: str, shots: List[Tuple[int, int]]) -> List[Dict[str, Any]]:
-        """
-        Thuật toán InfoShot Chuẩn: Trích xuất đúng 2 frames cho mỗi shot:
-        1. common_frame: Frame nằm ở giữa khoảng thời gian của shot (mid_idx).
-        2. sharpest_frame: Frame có độ sắc nét cao nhất trong shot 
-           (đo bằng phương sai của thuật toán Laplacian: cv2.Laplacian(gray, cv2.CV_64F).var()).
-        
-        Định dạng tên file đầu ra:
-        [video_name]_shot_[shot_id]_common.jpg
-        [video_name]_shot_[shot_id]_sharpest.jpg
-        """
+        """Extract common (mid-frame) and sharpest (max Laplacian variance) keyframes per shot."""
         video_name = os.path.splitext(os.path.basename(video_path))[0]
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
@@ -192,10 +150,8 @@ class VideoSegmenter:
             if shot_len <= 0:
                 continue
 
-            # 1. common_frame: Frame nằm ở giữa khoảng thời gian của shot
             mid_idx = start_idx + shot_len // 2
 
-            # 2. sharpest_frame: Chọn ứng viên có phương sai Laplacian cv2.Laplacian(gray, cv2.CV_64F).var() cao nhất
             step = max(1, shot_len // 5)
             candidates = sorted(list(set([start_idx, mid_idx, end_idx] + list(range(start_idx, end_idx + 1, step)))))
 
@@ -207,7 +163,6 @@ class VideoSegmenter:
                 ret, frame = cap.read()
                 if ret and frame is not None:
                     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                    # Tính phương sai Laplacian: cv2.Laplacian(gray, cv2.CV_64F).var()
                     laplacian_var = calculate_sharpness_laplacian(gray)
                     candidate_scores.append((c_idx, laplacian_var))
                     candidate_frames[c_idx] = frame
@@ -215,21 +170,18 @@ class VideoSegmenter:
             if not candidate_frames:
                 continue
 
-            # Xác định common_frame
             if mid_idx in candidate_frames:
                 common_frame = candidate_frames[mid_idx]
             else:
                 mid_idx = list(candidate_frames.keys())[0]
                 common_frame = candidate_frames[mid_idx]
 
-            # Xác định sharpest_frame
             sorted_scores = sorted(candidate_scores, key=lambda x: x[1], reverse=True)
             sharpest_idx = sorted_scores[0][0]
             if sharpest_idx == mid_idx and len(sorted_scores) > 1:
                 sharpest_idx = sorted_scores[1][0]
             sharpest_frame = candidate_frames[sharpest_idx]
 
-            # Đảm bảo cấu trúc tên file chuẩn: [video_name]_shot_[shot_id]_[common/sharpest].jpg
             shot_str = f"{shot_idx:04d}"
             common_filename = f"{video_name}_shot_{shot_str}_common.jpg"
             sharpest_filename = f"{video_name}_shot_{shot_str}_sharpest.jpg"
@@ -261,29 +213,25 @@ class VideoSegmenter:
         return extracted_metadata
 
     def process_video(self, video_path: str) -> List[Dict[str, Any]]:
-        """
-        Hàm chính bóc tách video. Nếu xảy ra lỗi hoặc không nạp được TransNet V2, quăng Exception ngắt luồng.
-        """
-        logger.info(f"Đang bóc tách video với TransNet V2 & InfoShot: {video_path}")
+        """Segment video into shots and extract keyframes using TransNetV2 and InfoShot."""
+        logger.info(f"Segmenting video: {video_path}")
         try:
             if not os.path.exists(video_path):
-                raise FileNotFoundError(f"Tệp video không tồn tại: {video_path}")
+                raise FileNotFoundError(f"Video file path not found: {video_path}")
 
-            # Bước 1: Dự đoán điểm chuyển cảnh bắt buộc bằng TransNet V2
             shots = self.predict_shot_boundaries(video_path)
-            logger.info(f"TransNet V2 phát hiện {len(shots)} shots cho video {os.path.basename(video_path)}")
+            logger.info(f"TransNetV2 detected {len(shots)} shots in video '{os.path.basename(video_path)}'.")
 
-            # Bước 2: InfoShot trích xuất 2 frames (common/sharpest) mỗi shot
             keyframes_meta = self.infoshot_extract_keyframes(video_path, shots)
-            logger.info(f"InfoShot đã lưu {len(keyframes_meta)} keyframes vào {self.output_dir}")
+            logger.info(f"Extracted {len(keyframes_meta)} keyframe artifacts to '{self.output_dir}'.")
 
             return keyframes_meta
 
         except Exception as e:
-            logger.error(f"[XỬ LÝ LỖI] Lỗi bóc tách video {video_path}: {str(e)}")
+            logger.error(f"Segmentation failed for video '{video_path}': {str(e)}")
             raise e
 
 
 if __name__ == "__main__":
     segmenter = VideoSegmenter()
-    print("VideoSegmenter đã được cập nhật cờ Quantization FP16 thành công!")
+    print("VideoSegmenter initialized successfully.")

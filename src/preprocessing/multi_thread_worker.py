@@ -1,15 +1,10 @@
-"""
-Multi-Threaded & Multi-Processed Pipeline Worker (Singleton Pattern Model Preloading)
-Điều phối xử lý song song video & audio cho Offline Indexing (Phase 1)
-Áp dụng Singleton Pattern nạp toàn bộ Mô hình (TransNetV2, PhoWhisper, YOLOv9, SigLIP 2, BGE-M3) 
-ĐÚNG 1 LẦN DUY NHẤT ở VRAM/RAM. Triệt tiêu hoàn toàn Rủi ro VRAM Concurrency & OOM khi chạy đa luồng.
-"""
+"""Multi-threaded pipeline worker for feature extraction and multimodal indexing."""
 
 import os
 import json
 import time
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import yaml
 import numpy as np
@@ -24,7 +19,6 @@ from src.database.metadata_db import MetadataDB
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("MultiThreadWorker")
 
-# Singleton Pattern Global State
 _GLOBAL_SEGMENTER: Optional[VideoSegmenter] = None
 _GLOBAL_AUDIO_PROCESSOR: Optional[AudioASRProcessor] = None
 _GLOBAL_VISION_ANALYTICS: Optional[VisionAnalytics] = None
@@ -67,7 +61,7 @@ def get_shared_embedding_generator(config_path: str = "config.yaml") -> Embeddin
 
 
 def parse_timestamp_str(ts_str: str) -> int:
-    """Chuyển đổi chuỗi hh:mm:ss.mmm sang milliseconds."""
+    """Parse timestamp string formatted as hh:mm:ss.mmm into milliseconds."""
     try:
         parts = ts_str.split(":")
         h = int(parts[0])
@@ -81,7 +75,7 @@ def parse_timestamp_str(ts_str: str) -> int:
 
 
 def preparse_asr_map(asr_map: Dict[str, str]) -> List[Tuple[int, int, str]]:
-    """Pre-parse asr_map chuỗi timestamp ranges sang danh sách Tuple (start_ms, end_ms, text)."""
+    """Pre-parse ASR timestamp ranges into a list of (start_ms, end_ms, text) tuples."""
     parsed = []
     for ts_range, text in asr_map.items():
         if not text:
@@ -98,7 +92,7 @@ def preparse_asr_map(asr_map: Dict[str, str]) -> List[Tuple[int, int, str]]:
 
 
 def match_asr_for_timestamp(frame_ts: int, parsed_asr_list: List[Tuple[int, int, str]], tolerance_ms: int = 3000) -> str:
-    """Khớp nhanh các phân đoạn ASR dựa trên danh sách Tuple (start_ms, end_ms, text) đã pre-parse."""
+    """Match ASR segments overlapping frame timestamp within tolerance bounds."""
     matched_texts = [
         text for start_ms, end_ms, text in parsed_asr_list
         if (start_ms - tolerance_ms) <= frame_ts <= (end_ms + tolerance_ms)
@@ -107,11 +101,7 @@ def match_asr_for_timestamp(frame_ts: int, parsed_asr_list: List[Tuple[int, int,
 
 
 class MultiThreadPipelineWorker:
-    """
-    Worker điều phối bóc tách dữ liệu đa luồng / đa tiến trình cho Offline Indexing.
-    Sử dụng Singleton Pattern nạp trước các mô hình GPU/CPU vào bộ nhớ dùng chung (Global Singletons).
-    VRAM giữ nguyên hằng số ~7.5GB cho mọi số lượng luồng worker, hoàn toàn không bị nhân VRAM gây OOM.
-    """
+    """Pipeline execution worker supporting concurrent video feature extraction."""
 
     def __init__(self, config_path: str = "config.yaml"):
         self.config_path = config_path
@@ -119,7 +109,7 @@ class MultiThreadPipelineWorker:
         import torch
         if torch.cuda.is_available():
             self.max_workers = 1
-            logger.info("Phát hiện CUDA GPU: Tự động tối ưu max_workers=1 để dồn 100% CUDA Compute và triệt tiêu treo luồng VRAM.")
+            logger.info("CUDA GPU detected: Constraining max_workers to 1 to optimize CUDA compute efficiency.")
         else:
             self.max_workers = self.config.get("preprocessing", {}).get("max_workers", 8)
         
@@ -131,36 +121,27 @@ class MultiThreadPipelineWorker:
         os.makedirs(self.embeddings_dir, exist_ok=True)
         os.makedirs(self.metadata_dir, exist_ok=True)
 
-        logger.info("Đang nạp các mô hình GPU/CPU theo Singleton Pattern vào VRAM dùng chung...")
+        logger.info("Pre-loading shared model singletons...")
         self.segmenter = get_shared_segmenter(self.config_path)
         self.audio_processor = get_shared_audio_processor(self.config_path)
         self.vision_analytics = get_shared_vision_analytics(self.config_path)
         self.emb_generator = get_shared_embedding_generator(self.config_path)
-        logger.info(f"Đã sẵn sàng MultiThreadPipelineWorker ({self.max_workers} max_workers, VRAM khống chế hằng số ~7.5GB).")
+        logger.info(f"MultiThreadPipelineWorker initialized (max_workers={self.max_workers}).")
 
     def process_single_video(self, video_path: str) -> Dict[str, Any]:
-        """
-        Quy trình xử lý hoàn chỉnh cho 1 tệp video:
-        1. Sử dụng Singleton Models đã load sẵn để chạy bóc tách Video & Audio.
-        2. Trích xuất đặc trưng độc lập (YOLOv9 + PaddleOCR/EasyOCR) cho các keyframes.
-        3. Khớp ASR chính xác theo timestamp của từng frame.
-        4. Tổng hợp bối cảnh LLM theo Cửa sổ 30 giây (Window-based Summarize).
-        5. Tạo Vector Embeddings cho Hình ảnh (SigLIP 2) và Văn bản (BGE-M3).
-        6. Ghi file [video_name]_metadata.json và [video_name]_img_emb.npy, [video_name]_text_emb.npy
-        """
+        """Process a single video file through segmentation, ASR, OCR, object detection, LLM context, and embedding generation."""
         video_name = os.path.splitext(os.path.basename(video_path))[0]
         start_time = time.time()
-        logger.info(f"=== Bắt đầu xử lý Video: {video_name} ===")
+        logger.info(f"Processing video: {video_name}")
 
         try:
-            # 1. Bóc tách video keyframes & audio ASR trên Singleton models
             keyframes_meta = self.segmenter.process_video(video_path)
             asr_map = self.audio_processor.process_audio(video_path)
 
-            logger.info(f"[{video_name}] Bóc tách xong {len(keyframes_meta)} keyframes và {len(asr_map)} đoạn ASR.")
+            logger.info(f"[{video_name}] Extracted {len(keyframes_meta)} keyframes and {len(asr_map)} ASR segments.")
 
             if not keyframes_meta:
-                logger.warning(f"[{video_name}] Không trích xuất được keyframe nào.")
+                logger.warning(f"[{video_name}] Keyframe extraction yielded 0 frames.")
                 return {
                     "video_name": video_name,
                     "video_path": video_path,
@@ -168,7 +149,6 @@ class MultiThreadPipelineWorker:
                     "reason": "No keyframes extracted"
                 }
 
-            # 2. Phân tích Thị giác độc lập (YOLOv9 + OCR) bằng Singleton VisionAnalytics
             raw_keyframes_meta = []
             image_paths = []
             parsed_asr_list = preparse_asr_map(asr_map)
@@ -189,8 +169,7 @@ class MultiThreadPipelineWorker:
 
                 raw_keyframes_meta.append(meta)
 
-            # 3. Tổng hợp bối cảnh LLM theo Cửa sổ 30s (Window-Based Summarize)
-            logger.info(f"[{video_name}] Tiến hành tổng hợp bối cảnh LLM theo Cửa sổ 30s (Window-Based)...")
+            logger.info(f"[{video_name}] Generating window-based LLM context summaries...")
             enriched_keyframes = window_based_summarize(raw_keyframes_meta, window_size=30, config_path=self.config_path)
 
             texts_for_embedding = []
@@ -204,12 +183,10 @@ class MultiThreadPipelineWorker:
                 combined_text = f"{obj_str}{ocr_str}{asr_str}{ctx_str}".strip()
                 texts_for_embedding.append(combined_text if combined_text else "Video keyframe")
 
-            # 4. Trích xuất Vector Embeddings bằng Singleton EmbeddingGenerator (SigLIP 2 & BGE-M3)
-            logger.info(f"[{video_name}] Đang tạo Image & Text Embeddings...")
+            logger.info(f"[{video_name}] Generating visual and text embeddings...")
             image_embeddings = self.emb_generator.get_image_embeddings_batch(image_paths)
             text_embeddings = self.emb_generator.get_text_embeddings_batch(texts_for_embedding)
 
-            # 5. Ghi file kết quả vào processed_data/
             img_emb_path = os.path.join(self.embeddings_dir, f"{video_name}_img_emb.npy")
             text_emb_path = os.path.join(self.embeddings_dir, f"{video_name}_text_emb.npy")
 
@@ -251,11 +228,11 @@ class MultiThreadPipelineWorker:
                     db_success = True
                     break
                 except Exception as e:
-                    logger.warning(f"Thử chèn SQLite lần {attempt + 1}/3 cho {video_name} thất bại: {e}")
+                    logger.warning(f"SQLite insertion attempt {attempt + 1}/3 failed for {video_name}: {e}")
                     time.sleep(1)
 
             if not db_success:
-                logger.error(f"[LỖI NGHIÊM TRỌNG] Không thể chèn SQLite Metadata cho video {video_name} sau 3 lần thử.")
+                logger.error(f"SQLite metadata insertion failed for {video_name} after 3 retries.")
                 return {
                     "video_name": video_name,
                     "video_path": video_path,
@@ -264,7 +241,7 @@ class MultiThreadPipelineWorker:
                 }
 
             elapsed = time.time() - start_time
-            logger.info(f"=== [HOÀN THÀNH] {video_name} trong {elapsed:.2f}s | Metadata: {json_metadata_path} ===")
+            logger.info(f"Completed video processing: {video_name} in {elapsed:.2f}s | Metadata: {json_metadata_path}")
 
             return {
                 "video_name": video_name,
@@ -278,7 +255,7 @@ class MultiThreadPipelineWorker:
             }
 
         except Exception as e:
-            logger.error(f"[XỬ LÝ LỖI] Lỗi bóc tách video {video_name}: {str(e)}")
+            logger.error(f"Processing failed for video {video_name}: {str(e)}")
             return {
                 "video_name": video_name,
                 "video_path": video_path,
@@ -287,11 +264,9 @@ class MultiThreadPipelineWorker:
             }
 
     def process_video_batch_parallel(self, video_paths: List[str]) -> List[Dict[str, Any]]:
-        """
-        Chạy song song danh sách video_paths sử dụng ThreadPoolExecutor trên các Singleton Models dùng chung.
-        """
+        """Process a batch of video paths concurrently using shared model singletons."""
         results = []
-        logger.info(f"Bắt đầu xử lý song song {len(video_paths)} videos (Singleton Models preloaded)...")
+        logger.info(f"Initiating batch processing for {len(video_paths)} videos...")
         
         with ThreadPoolExecutor(max_workers=min(len(video_paths), self.max_workers)) as executor:
             future_to_video = {
@@ -305,17 +280,17 @@ class MultiThreadPipelineWorker:
                     res = future.result()
                     results.append(res)
                 except Exception as exc:
-                    logger.error(f"Video {video_path} phát sinh ngoại lệ: {exc}")
+                    logger.error(f"Execution exception for video {video_path}: {exc}")
                     results.append({
                         "video_path": video_path,
                         "status": "error",
                         "error": str(exc)
                     })
                     
-        logger.info(f"Đã hoàn thành xử lý {len(results)}/{len(video_paths)} videos.")
+        logger.info(f"Batch processing completed: {len(results)}/{len(video_paths)} videos.")
         return results
 
 
 if __name__ == "__main__":
     worker = MultiThreadPipelineWorker()
-    print("MultiThreadPipelineWorker khởi tạo thành công với Singleton Pattern!")
+    print("MultiThreadPipelineWorker initialized successfully.")
