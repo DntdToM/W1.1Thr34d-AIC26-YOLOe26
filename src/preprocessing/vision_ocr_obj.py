@@ -43,6 +43,40 @@ def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
     return {}
 
 
+COCO_VI_MAP = {
+    "person": "người", "car": "ô tô", "motorcycle": "xe máy", "airplane": "máy bay",
+    "bus": "xe buýt", "train": "tàu hỏa", "truck": "xe tải", "boat": "thuyền",
+    "traffic light": "đèn giao thông", "bench": "ghế", "bird": "chim", "cat": "mèo",
+    "dog": "chó", "backpack": "ba lô", "umbrella": "ô dù", "handbag": "túi xách",
+    "tie": "cà vạt", "suitcase": "va li", "bottle": "chai nước", "cup": "cốc",
+    "chair": "ghế", "couch": "ghế sofa", "potted plant": "chậu cây", "tv": "tivi",
+    "laptop": "máy tính xách tay", "cell phone": "điện thoại", "clock": "đồng hồ", "book": "sách"
+}
+
+
+def _clean_llm_response(text: str) -> str:
+    """Loại bỏ các câu chào hỏi/lời dẫn thừa và định dạng markdown rác từ phản hồi LLM."""
+    if not text:
+        return ""
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    cleaned_lines = []
+    for line in lines:
+        lower_line = line.lower()
+        # Bỏ qua các dòng lời dẫn chatty không chứa ngữ cảnh video
+        if any(lower_line.startswith(prefix) for prefix in [
+            "sau khi", "dưới đây", "kết quả", "tôi đã", "đây là", "bảng tóm tắt",
+            "1. sửa lỗi", "2. lọc", "dữ liệu đã", "văn bản đọc"
+        ]):
+            continue
+        # Bỏ ký tự markdown bullet điểm
+        cleaned_line = line.lstrip("-*•1234567890. ").strip()
+        if cleaned_line:
+            cleaned_lines.append(cleaned_line)
+    
+    final_text = " ".join(cleaned_lines)
+    return final_text if final_text else text.strip()
+
+
 def call_groq_api(prompt: str, groq_key: str, model_name: str = "llama-3.1-8b-instant") -> Optional[str]:
     """
     Gọi Groq API hỗ trợ xoay vòng nhiều API Keys (phân cách bởi dấu phẩy).
@@ -56,6 +90,15 @@ def call_groq_api(prompt: str, groq_key: str, model_name: str = "llama-3.1-8b-in
     if not keys_list:
         return None
 
+    system_prompt = (
+        "Bạn là bộ trích xuất Metadata Video chuyên nghiệp cho Hệ thống Tìm kiếm Đa phương tiện.\n"
+        "QUY TẮC BẮT BUỘC:\n"
+        "1. CHỈ XUẤT ĐÚNG 1 ĐOẠN VĂN TIẾNG VIỆT THUẦN (TỐI ĐA 40 TỪ) MÔ TẢ NỘI DUNG VÀ BỐI CẢNH NỔI BẬT.\n"
+        "2. TUYỆT ĐỐI KHÔNG CHÀO HỎI, KHÔNG LỜI DẪN ('Dưới đây là...', 'Sau khi xử lý...', 'Kết quả...').\n"
+        "3. TUYỆT ĐỐI KHÔNG SỬ DỤNG GẠCH ĐẦU DÒNG, DANH SÁCH, ĐÁNH SỐ THỨ TỰ HAY BẤT KỲ ĐỊNH DẠNG MARKDOWN NÀO.\n"
+        "4. TỰ ĐỘNG SỬA LỖI CHÍNH TẢ CHO VĂN BẢN OCR NẾU CÓ."
+    )
+
     for active_key in keys_list:
         # 1. Thử dùng thư viện groq chính thức nếu có
         try:
@@ -64,25 +107,18 @@ def call_groq_api(prompt: str, groq_key: str, model_name: str = "llama-3.1-8b-in
             completion = client.chat.completions.create(
                 model=model_name,
                 messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Bạn là trợ lý AI chuyên nghiệp xử lý dữ liệu video. "
-                            "Nhiệm vụ: 1. Sửa lỗi chính tả OCR tiếng Việt. "
-                            "2. Lọc bỏ vật thể rác/lặp lại. "
-                            "3. Viết 1 đoạn tóm tắt ngữ cảnh ngắn gọn (< 50 từ)."
-                        )
-                    },
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.2,
-                max_tokens=300
+                temperature=0.1,
+                max_tokens=150
             )
             if completion.choices:
                 res_text = completion.choices[0].message.content.strip()
                 if res_text:
+                    cleaned_out = _clean_llm_response(res_text)
                     logger.info(f"Đã phản hồi thành công từ Groq SDK ({model_name}).")
-                    return res_text
+                    return cleaned_out
         except Exception:
             pass
 
@@ -95,19 +131,11 @@ def call_groq_api(prompt: str, groq_key: str, model_name: str = "llama-3.1-8b-in
         payload = {
             "model": model_name,
             "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "Bạn là trợ lý AI chuyên nghiệp xử lý dữ liệu video. "
-                        "Nhiệm vụ: 1. Sửa lỗi chính tả OCR tiếng Việt. "
-                        "2. Lọc bỏ vật thể rác/lặp lại. "
-                        "3. Viết 1 đoạn tóm tắt ngữ cảnh ngắn gọn (< 50 từ)."
-                    )
-                },
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
-            "temperature": 0.2,
-            "max_tokens": 300
+            "temperature": 0.1,
+            "max_tokens": 150
         }
         try:
             res = requests.post(url, headers=headers, json=payload, timeout=10)
@@ -117,8 +145,9 @@ def call_groq_api(prompt: str, groq_key: str, model_name: str = "llama-3.1-8b-in
                 if choices and "message" in choices[0]:
                     res_text = choices[0]["message"].get("content", "").strip()
                     if res_text:
+                        cleaned_out = _clean_llm_response(res_text)
                         logger.info(f"Đã phản hồi thành công từ Groq REST API ({model_name}).")
-                        return res_text
+                        return cleaned_out
             elif res.status_code == 429:
                 logger.warning(f"Groq Key ({active_key[:8]}...) dính rate-limit (429). Chuyển sang Key kế tiếp...")
                 continue
@@ -312,12 +341,13 @@ def window_based_summarize(frames_data: List[Dict[str, Any]], window_size: Optio
                     all_ocr.append(ocr_text.strip())
 
         unique_objects = list(set(all_objects))
+        objects_vi = [COCO_VI_MAP.get(obj, obj) for obj in unique_objects]
         unique_ocr = list(set(all_ocr))
 
         window_data_str = (
-            f"Thời gian: {batch_start_sec}s - {batch_end_sec}s. "
-            f"Vật thể xuất hiện: {', '.join(unique_objects) if unique_objects else 'Không có'}. "
-            f"Văn bản đọc được (OCR): {' | '.join(unique_ocr) if unique_ocr else 'Không có'}."
+            f"Khoảng thời gian: {batch_start_sec}s - {batch_end_sec}s.\n"
+            f"Vật thể xuất hiện: {', '.join(objects_vi) if objects_vi else 'Không có'}.\n"
+            f"Văn bản OCR đọc được: {' | '.join(unique_ocr) if unique_ocr else 'Không có'}."
         )
 
         logger.info(f"Đang tổng hợp LLM Context batch {batch_num}/{total_batches} [{batch_start_sec}s - {batch_end_sec}s] ({len(batch_frames)} frames)...")
