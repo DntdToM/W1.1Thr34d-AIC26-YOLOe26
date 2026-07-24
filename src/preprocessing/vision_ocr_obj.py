@@ -106,7 +106,7 @@ def call_groq_api(prompt: str, groq_key: str, model_name: str = "llama-3.1-8b-in
         "1. CHỈ XUẤT ĐÚNG 1 ĐOẠN VĂN TIẾNG VIỆT THUẦN (TỐI ĐA 40 TỪ) MÔ TẢ NỘI DUNG VÀ BỐI CẢNH NỔI BẬT.\n"
         "2. TUYỆT ĐỐI KHÔNG CHÀO HỎI, KHÔNG LỜI DẪN ('Dưới đây là...', 'Sau khi xử lý...', 'Kết quả...').\n"
         "3. TUYỆT ĐỐI KHÔNG SỬ DỤNG GẠCH ĐẦU DÒNG, DANH SÁCH, ĐÁNH SỐ THỨ TỰ HAY BẤT KỲ ĐỊNH DẠNG MARKDOWN NÀO.\n"
-        "4. TỰ ĐỘNG SỬA LỖI CHÍNH TẢ DỰA TRÊN CẢ VĂN BẢN OCR VÀ DỊCH BẤT KỲ VẬT THỂ TIẾNG ANH NÀO SANG TIẾNG VIỆT."
+        "4. SỬA LỖI CHÍNH TẢ TIẾNG VIỆT CHO VĂN BẢN OCR (NẾU CÓ), GIỮ NGUYÊN TÊN RIÊNG VÀ KHÔNG DỊCH TÊN TIẾNG ANH GỐC."
     )
 
     for active_key in keys_list:
