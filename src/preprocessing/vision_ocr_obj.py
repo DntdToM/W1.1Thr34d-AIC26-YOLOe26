@@ -72,15 +72,13 @@ def _clean_llm_response(text: str) -> str:
     cleaned_lines = []
     for line in lines:
         lower_line = line.lower()
-        # Bỏ qua các dòng lời dẫn chatty không chứa ngữ cảnh video
         if any(lower_line.startswith(prefix) for prefix in [
             "sau khi", "dưới đây", "kết quả", "tôi đã", "đây là", "bảng tóm tắt",
-            "1. sửa lỗi", "2. lọc", "dữ liệu đã", "văn bản đọc"
+            "1. sửa lỗi", "2. lọc", "dữ liệu đã"
         ]):
             continue
-        # Bỏ ký tự markdown bullet điểm
         cleaned_line = line.lstrip("-*•1234567890. ").strip()
-        if cleaned_line:
+        if cleaned_line and len(cleaned_line) > 2:
             cleaned_lines.append(cleaned_line)
     
     final_text = " ".join(cleaned_lines)
@@ -102,9 +100,9 @@ def call_groq_api(prompt: str, groq_key: str, model_name: str = "llama-3.1-8b-in
 
     system_prompt = (
         "Bạn là bộ trích xuất Metadata Video chuyên nghiệp cho Hệ thống Tìm kiếm Đa phương tiện.\n"
-        "QUY TẮC BẮT BUỘC:\n"
+        "QUY TẮC BẮT BUỘC KHÔNG ĐƯỢC VI PHẠM:\n"
         "1. CHỈ XUẤT ĐÚNG 1 ĐOẠN VĂN TIẾNG VIỆT THUẦN (TỐI ĐA 40 TỪ) MÔ TẢ NỘI DUNG VÀ BỐI CẢNH NỔI BẬT.\n"
-        "2. TUYỆT ĐỐI KHÔNG CHÀO HỎI, KHÔNG LỜI DẪN ('Dưới đây là...', 'Sau khi xử lý...', 'Kết quả...').\n"
+        "2. TUYỆT ĐỐI KHÔNG CHÀO HỎI, KHÔNG LỜI DẪN, KHÔNG LIỆT KÊ DANH SÁCH TỪ ĐƠN ĐỘC.\n"
         "3. TUYỆT ĐỐI KHÔNG SỬ DỤNG GẠCH ĐẦU DÒNG, DANH SÁCH, ĐÁNH SỐ THỨ TỰ HAY BẤT KỲ ĐỊNH DẠNG MARKDOWN NÀO.\n"
         "4. SỬA LỖI CHÍNH TẢ TIẾNG VIỆT CHO VĂN BẢN OCR (NẾU CÓ), GIỮ NGUYÊN TÊN RIÊNG VÀ KHÔNG DỊCH TÊN TIẾNG ANH GỐC."
     )
