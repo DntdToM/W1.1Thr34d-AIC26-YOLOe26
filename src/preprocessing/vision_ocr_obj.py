@@ -99,12 +99,14 @@ def call_groq_api(prompt: str, groq_key: str, model_name: str = "llama-3.1-8b-in
         return None
 
     system_prompt = (
-        "Bạn là bộ trích xuất Metadata Video chuyên nghiệp cho Hệ thống Tìm kiếm Đa phương tiện.\n"
-        "QUY TẮC BẮT BUỘC KHÔNG ĐƯỢC VI PHẠM:\n"
-        "1. CHỈ XUẤT ĐÚNG 1 ĐOẠN VĂN TIẾNG VIỆT THUẦN (TỐI ĐA 40 TỪ) MÔ TẢ NỘI DUNG VÀ BỐI CẢNH NỔI BẬT.\n"
-        "2. TUYỆT ĐỐI KHÔNG CHÀO HỎI, KHÔNG LỜI DẪN, KHÔNG LIỆT KÊ DANH SÁCH TỪ ĐƠN ĐỘC.\n"
-        "3. TUYỆT ĐỐI KHÔNG SỬ DỤNG GẠCH ĐẦU DÒNG, DANH SÁCH, ĐÁNH SỐ THỨ TỰ HAY BẤT KỲ ĐỊNH DẠNG MARKDOWN NÀO.\n"
-        "4. SỬA LỖI CHÍNH TẢ TIẾNG VIỆT CHO VĂN BẢN OCR (NẾU CÓ), GIỮ NGUYÊN TÊN RIÊNG VÀ KHÔNG DỊCH TÊN TIẾNG ANH GỐC."
+        "Bạn là hệ thống trích xuất metadata video cho công cụ tìm kiếm đa phương tiện.\n"
+        "Yêu cầu bắt buộc:\n"
+        "1. Chỉ xuất đúng một đoạn văn xuôi tiếng Việt tự nhiên hoàn chỉnh, tối đa 60 từ.\n"
+        "2. Mô tả ngắn gọn nội dung chính, đối tượng, hành động và bối cảnh nổi bật của khung hình hoặc video.\n"
+        "3. Nếu đầu vào có OCR, hãy sửa lỗi chính tả tiếng Việt trước khi sử dụng thông tin đó để tạo mô tả.\n"
+        "4. Nếu OCR không rõ hoặc không liên quan, hãy bỏ qua.\n"
+        "5. Giữ nguyên tên người, địa danh, thương hiệu, tên sản phẩm và các tên tiếng Anh gốc.\n"
+        "6. Không chào hỏi, không giải thích, không markdown, không gạch đầu dòng, không đánh số; chỉ xuất duy nhất đoạn mô tả."
     )
 
     for active_key in keys_list:
