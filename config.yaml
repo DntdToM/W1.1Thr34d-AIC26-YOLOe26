@@ -66,6 +66,10 @@ late_fusion:
   top_k_retrieval: 100
   top_k_rerank: 30
 
+temporal_reasoning:
+  max_temporal_gap_sec: 30  # Max time gap between sequential sub-query events (synced with window_size)
+  max_chains_limit: 500     # Upper bound on temporal chain candidates to prevent combinatorial explosion
+
 backend:
   host: "0.0.0.0"
   port: 8000
