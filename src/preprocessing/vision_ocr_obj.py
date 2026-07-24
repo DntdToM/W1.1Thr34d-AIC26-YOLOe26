@@ -169,7 +169,7 @@ def call_gemini_api(prompt: str, gemini_key: str) -> Optional[str]:
 
 def correct_ocr_text(raw_text: str, config_path: str = "config.yaml") -> str:
     """
-    Sửa lỗi chính tả & khôi phục dấu tiếng Việt cho chuỗi OCR thô bằng Groq API / Gemini Flash API.
+    Sửa lỗi chính tả & khôi phục dấu tiếng Việt cho chuỗi OCR thô bằng Groq Multi-Keys / Gemini Flash API xoay vòng.
     """
     if not raw_text or not raw_text.strip():
         return ""
@@ -186,61 +186,33 @@ def correct_ocr_text(raw_text: str, config_path: str = "config.yaml") -> str:
         f"Văn bản OCR thô:\n\"{raw_text}\""
     )
 
-    # 1. Thử gọi Groq API (Ưu tiên số 1 - Siêu tốc > 300 tokens/s)
     groq_key = os.getenv("GROQ_API_KEY") or llm_cfg.get("groq_api_key", "")
-    groq_model = llm_cfg.get("groq_model", "llama-3.3-70b-versatile")
-    if groq_key:
-        groq_res = call_groq_api(prompt, groq_key, model_name=groq_model)
-        if groq_res:
-            return groq_res
-
-    # 2. Thử gọi Gemini Flash API
+    groq_model = llm_cfg.get("groq_model", "llama-3.1-8b-instant")
     gemini_key = os.getenv("GEMINI_API_KEY") or llm_cfg.get("gemini_api_key", "")
-    if gemini_key:
-        gemini_res = call_gemini_api(prompt, gemini_key)
-        if gemini_res:
-            return gemini_res
 
-    # 3. Thử gọi OpenAI API
-    openai_key = os.getenv("OPENAI_API_KEY")
-    if openai_key:
-        try:
-            import openai
-            client = openai.OpenAI(api_key=openai_key)
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.2
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            logger.warning(f"Gọi OpenAI API không thành công: {e}")
+    # Vòng lặp xoay vòng liên tục tối đa 3 lượt (Groq Multi-Keys -> Gemini -> Retry)
+    for attempt in range(3):
+        # 1. Thử xoay vòng qua danh sách Groq API Keys (Llama 3.1 8B Instant)
+        if groq_key and groq_key != "YOUR_GROQ_API_KEY_HERE":
+            groq_res = call_groq_api(prompt, groq_key, model_name=groq_model)
+            if groq_res:
+                return groq_res
 
-    # 4. Fallback sang Ollama Local (Qwen2.5-7B) — CHỈ khi Ollama đang chạy
-    ollama_url = llm_cfg.get("ollama_url", "http://localhost:11434")
-    model_name = llm_cfg.get("model_name", "qwen2.5:7b-instruct-q4_K_M")
-    
-    if _check_ollama_available(ollama_url):
-        try:
-            res = requests.post(
-                f"{ollama_url}/api/generate",
-                json={"model": model_name, "prompt": prompt, "stream": False},
-                timeout=8
-            )
-            if res.status_code == 200:
-                fixed_text = res.json().get("response", "").strip()
-                if fixed_text:
-                    return fixed_text
-        except Exception as e:
-            logger.warning(f"Không thể kết nối Ollama Local LLM: {e}")
+        # 2. Nếu tất cả Groq Keys bị 429 -> Chuyển qua Gemini Flash API
+        if gemini_key and gemini_key != "YOUR_GEMINI_API_KEY_HERE":
+            gemini_res = call_gemini_api(prompt, gemini_key)
+            if gemini_res:
+                return gemini_res
+
+        time.sleep(3)
 
     return raw_text.strip()
 
 
 def summarize_window_with_llm(window_data_str: str, config_path: str = "config.yaml") -> str:
     """
-    Gọi API Groq / Gemini Flash / Local Ollama 
-    ĐÚNG 1 LẦN cho mỗi cửa sổ 30 giây để tổng hợp ngữ cảnh bối cảnh chung (< 50 từ).
+    Vòng lặp xoay vòng liên tục giữa Groq Multi-Keys (Llama 3.1 8B Instant) và Gemini Flash API.
+    ĐÚNG 1 LẦN cho mỗi batch 90s để tối ưu 98% số lần gọi API.
     """
     if not window_data_str or not window_data_str.strip():
         return ""
@@ -249,58 +221,33 @@ def summarize_window_with_llm(window_data_str: str, config_path: str = "config.y
     llm_cfg = config.get("models", {}).get("llm", {})
 
     prompt = (
-        f"Dưới đây là dữ liệu thô trích xuất từ các frames trong 30 giây của một video góc nhìn thứ nhất:\n"
+        f"Dưới đây là dữ liệu thô trích xuất từ các frames trong 30-90 giây của một video:\n"
         f"{window_data_str}\n\n"
-        "Hãy sửa lỗi chính tả OCR, loại bỏ các vật thể nhiễu, và viết một metadata tổng hợp (chưa tới 50 từ) mô tả bối cảnh chung của toàn bộ 30 giây này."
+        "Hãy sửa lỗi chính tả OCR tiếng Việt, loại bỏ các vật thể nhiễu/lặp lại, và viết một đoạn metadata tổng hợp ngắn gọn (< 50 từ) mô tả bối cảnh chung."
     )
 
-    # 1. Thử gọi Groq API (Ưu tiên số 1 - Siêu tốc > 300 tokens/s)
     groq_key = os.getenv("GROQ_API_KEY") or llm_cfg.get("groq_api_key", "")
-    groq_model = llm_cfg.get("groq_model", "llama-3.3-70b-versatile")
-    if groq_key:
-        groq_res = call_groq_api(prompt, groq_key, model_name=groq_model)
-        if groq_res:
-            return groq_res
-
-    # 2. Thử gọi Gemini Flash API
+    groq_model = llm_cfg.get("groq_model", "llama-3.1-8b-instant")
     gemini_key = os.getenv("GEMINI_API_KEY") or llm_cfg.get("gemini_api_key", "")
-    if gemini_key:
-        gemini_res = call_gemini_api(prompt, gemini_key)
-        if gemini_res:
-            return gemini_res
 
-    # 3. Thử gọi OpenAI API
-    openai_key = os.getenv("OPENAI_API_KEY")
-    if openai_key:
-        try:
-            import openai
-            client = openai.OpenAI(api_key=openai_key)
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            logger.warning(f"Gọi OpenAI API cho Window Summary không thành công: {e}")
+    # Vòng lặp xoay vòng liên tục tối đa 3 lượt (Groq Multi-Keys -> Gemini -> Retry)
+    for attempt in range(3):
+        # 1. Thử xoay vòng qua danh sách Groq API Keys (Llama 3.1 8B Instant)
+        if groq_key and groq_key != "YOUR_GROQ_API_KEY_HERE":
+            groq_res = call_groq_api(prompt, groq_key, model_name=groq_model)
+            if groq_res:
+                return groq_res
 
-    # 4. Local LLM Ollama (Qwen2.5-7B) — CHỈ khi Ollama đang chạy
-    ollama_url = llm_cfg.get("ollama_url", "http://localhost:11434")
-    model_name = llm_cfg.get("model_name", "qwen2.5:7b-instruct-q4_K_M")
+        # 2. Nếu tất cả Groq Keys bị Rate-Limit (429) -> Nhảy sang Gemini Flash API
+        if gemini_key and gemini_key != "YOUR_GEMINI_API_KEY_HERE":
+            logger.info("Chuyển sang thử Gemini Flash API...")
+            gemini_res = call_gemini_api(prompt, gemini_key)
+            if gemini_res:
+                return gemini_res
 
-    if _check_ollama_available(ollama_url):
-        try:
-            res = requests.post(
-                f"{ollama_url}/api/generate",
-                json={"model": model_name, "prompt": prompt, "stream": False},
-                timeout=10
-            )
-            if res.status_code == 200:
-                summary_text = res.json().get("response", "").strip()
-                if summary_text:
-                    return summary_text
-        except Exception as e:
-            logger.warning(f"Không thể kết nối Ollama Local LLM cho Window Summary: {e}")
+        # 3. Nếu cả 4 Groq Keys và Gemini đều dính 429, chờ 4s rồi lặp lại xoay vòng lượt tiếp theo
+        logger.warning(f"[Lượt xoay vòng {attempt + 1}/3] Cả Groq Multi-Keys và Gemini đều bị Rate-Limit. Chờ 4s rồi xoay vòng lại...")
+        time.sleep(4)
 
     return window_data_str.strip()
 
