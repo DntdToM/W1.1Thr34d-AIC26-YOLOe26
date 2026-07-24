@@ -151,6 +151,12 @@ class DynamicSceneAwareReranker:
 
                 clip_score = max_score * 0.7 + avg_score * 0.3
 
+                # Temporal Order Bonus: Neu clip chua nhieu keyframe duoc tra ve va co thu tu timestamp tang dan
+                if len(event_frames) > 1:
+                    sorted_by_ts = sorted(event_frames, key=lambda x: x["timestamp_ms"])
+                    if sorted_by_ts == event_frames:
+                        clip_score *= 1.15  # 15% bonus for naturally ordered temporal sequence
+
                 min_ts = min(f["timestamp_ms"] for f in event_frames)
                 max_ts = max(f["timestamp_ms"] for f in event_frames)
                 shot_ids = list(set(f["shot_id"] for f in event_frames))

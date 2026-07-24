@@ -19,9 +19,9 @@ st.markdown("### Hệ thống truy xuất Video đa phương tiện độ trễ 
 # --- SIDEBAR CONFIGURATION ---
 with st.sidebar:
     st.header("⚙️ Cấu hình Trọng số & Tìm kiếm")
-    image_weight = st.slider("Trọng số Hình ảnh (SigLIP 2)", 0.0, 1.0, 0.7, 0.05)
-    audio_weight = st.slider("Trọng số Âm thanh (PhoWhisper)", 0.0, 1.0, 0.2, 0.05)
-    metadata_weight = st.slider("Trọng số Metadata (OCR/Objects)", 0.0, 1.0, 0.1, 0.05)
+    image_weight = st.slider("Trọng số Hình ảnh (SigLIP 2)", 0.0, 1.0, 0.60, 0.05)
+    metadata_weight = st.slider("Trọng số Metadata (OCR/Objects)", 0.0, 1.0, 0.30, 0.05)
+    audio_weight = st.slider("Trọng số Âm thanh (PhoWhisper)", 0.0, 1.0, 0.10, 0.05)
     
     top_k = st.number_input("Top K Clips trả về", min_value=5, max_value=200, value=30)
     backend_url = st.text_input("FastAPI Backend URL", "http://localhost:8000")

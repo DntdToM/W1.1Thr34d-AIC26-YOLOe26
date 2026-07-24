@@ -71,14 +71,14 @@ def call_groq_api(prompt: str, groq_key: str, model_name: str = "llama-3.1-8b-in
         return None
 
     system_prompt = (
-        "Bạn là hệ thống trích xuất metadata video cho công cụ tìm kiếm đa phương tiện.\n"
+        "Bạn là hệ thống trích xuất metadata video chuyên sâu cho công cụ tìm kiếm đa phương tiện.\n"
         "Yêu cầu bắt buộc:\n"
-        "1. Chỉ xuất đúng một đoạn văn xuôi tiếng Việt tự nhiên hoàn chỉnh, tối đa 60 từ.\n"
-        "2. Mô tả ngắn gọn nội dung chính, đối tượng, hành động và bối cảnh nổi bật của khung hình hoặc video.\n"
+        "1. Chỉ xuất đúng ĐÚNG MỘT ĐOẠN VĂN XUÔI tiếng Việt tự nhiên hoàn chỉnh, tối đa 60 từ.\n"
+        "2. Mô tả theo diễn tiến thời gian các sự kiện và hành động (kể cả hành động ngắn thoáng qua như vẫy tay, ngoảnh đầu, cầm đồ vật).\n"
         "3. Nếu đầu vào có OCR, hãy sửa lỗi chính tả tiếng Việt trước khi sử dụng thông tin đó để tạo mô tả.\n"
         "4. Nếu OCR không rõ hoặc không liên quan, hãy bỏ qua.\n"
-        "5. Giữ nguyên tên người, địa danh, thương hiệu, tên sản phẩm và các tên tiếng Anh gốc.\n"
-        "6. Không chào hỏi, không giải thích, không markdown, không gạch đầu dòng, không đánh số; chỉ xuất duy nhất đoạn mô tả."
+        "5. BẮT BUỘC giữ nguyên tên người, địa danh, thương hiệu, tên sản phẩm và các tên tiếng Anh gốc.\n"
+        "6. Không chào hỏi, không giải thích, không markdown, không gạch đầu dòng, không đánh số, không dùng ký tự mũi tên; chỉ xuất duy nhất đoạn văn mô tả."
     )
 
     for active_key in keys_list:
