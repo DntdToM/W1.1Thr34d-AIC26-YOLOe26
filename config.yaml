@@ -46,8 +46,8 @@ models:
     lang: "vi"
     use_angle_cls: true
   llm:
-    groq_api_key: "YOUR_GROQ_API_KEY_HERE"  # Set via environment variable GROQ_API_KEY or config
-    groq_model: "llama-3.3-70b-versatile"  # High performance Llama 3.3 70B model on Groq
+    groq_api_key: "YOUR_GROQ_API_KEY_HERE"  # Set via environment variable GROQ_API_KEY (supports multi-keys comma separated: key1,key2,key3)
+    groq_model: "llama-3.1-8b-instant"  # High speed 14.4k RPD & 500k TPD model on Groq
     gemini_api_key: "YOUR_GEMINI_API_KEY_HERE"  # Fallback Gemini Flash API Key
     ollama_url: "http://localhost:11434"
     model_name: "qwen2.5:7b-instruct-q4_K_M"  # 4-bit Quantized GGUF LLM

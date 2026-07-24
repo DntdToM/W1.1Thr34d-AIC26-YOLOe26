@@ -43,21 +43,58 @@ def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
     return {}
 
 
-def call_groq_api(prompt: str, groq_key: str, model_name: str = "llama-3.3-70b-versatile") -> Optional[str]:
+def call_groq_api(prompt: str, groq_key: str, model_name: str = "llama-3.1-8b-instant") -> Optional[str]:
     """
-    Gọi Groq API (sử dụng Groq SDK hoặc REST API siêu tốc > 300 tokens/sec).
-    Mô hình Llama-3.3-70B hiểu ngữ cảnh tiếng Việt rất sâu và sửa lỗi OCR cực mượt.
+    Gọi Groq API hỗ trợ xoay vòng nhiều API Keys (phân cách bởi dấu phẩy).
+    Sử dụng mô hình Llama-3.1-8B-Instant (14.4k RPD / 500k TPD) siêu tốc > 800 tokens/sec.
     """
     if not groq_key or groq_key == "YOUR_GROQ_API_KEY_HERE":
         return None
 
-    # 1. Thử dùng thư viện groq chính thức nếu có
-    try:
-        from groq import Groq
-        client = Groq(api_key=groq_key)
-        completion = client.chat.completions.create(
-            model=model_name,
-            messages=[
+    # Tách danh sách keys nếu truyền nhiều keys (ví dụ: "gsk_1,gsk_2,gsk_3")
+    keys_list = [k.strip() for k in groq_key.split(",") if k.strip() and k.strip() != "YOUR_GROQ_API_KEY_HERE"]
+    if not keys_list:
+        return None
+
+    for active_key in keys_list:
+        # 1. Thử dùng thư viện groq chính thức nếu có
+        try:
+            from groq import Groq
+            client = Groq(api_key=active_key)
+            completion = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Bạn là trợ lý AI chuyên nghiệp xử lý dữ liệu video. "
+                            "Nhiệm vụ: 1. Sửa lỗi chính tả OCR tiếng Việt. "
+                            "2. Lọc bỏ vật thể rác/lặp lại. "
+                            "3. Viết 1 đoạn tóm tắt ngữ cảnh ngắn gọn (< 50 từ)."
+                        )
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2,
+                max_tokens=300
+            )
+            if completion.choices:
+                res_text = completion.choices[0].message.content.strip()
+                if res_text:
+                    logger.info(f"Đã phản hồi thành công từ Groq SDK ({model_name}).")
+                    return res_text
+        except Exception:
+            pass
+
+        # 2. Fallback sang REST API thuần (không cần pip install groq)
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {active_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": model_name,
+            "messages": [
                 {
                     "role": "system",
                     "content": (
@@ -69,55 +106,24 @@ def call_groq_api(prompt: str, groq_key: str, model_name: str = "llama-3.3-70b-v
                 },
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.2,
-            max_tokens=300
-        )
-        if completion.choices:
-            res_text = completion.choices[0].message.content.strip()
-            if res_text:
-                logger.info(f"Đã phản hồi thành công từ Groq SDK ({model_name}).")
-                return res_text
-    except Exception:
-        pass
-
-    # 2. Fallback sang REST API thuần (không cần pip install groq)
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {groq_key}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": model_name,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "Bạn là trợ lý AI chuyên nghiệp xử lý dữ liệu video. "
-                    "Nhiệm vụ: 1. Sửa lỗi chính tả OCR tiếng Việt. "
-                    "2. Lọc bỏ vật thể rác/lặp lại. "
-                    "3. Viết 1 đoạn tóm tắt ngữ cảnh ngắn gọn (< 50 từ)."
-                )
-            },
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.2,
-        "max_tokens": 300
-    }
-    try:
-        res = requests.post(url, headers=headers, json=payload, timeout=10)
-        if res.status_code == 200:
-            data = res.json()
-            choices = data.get("choices", [])
-            if choices and "message" in choices[0]:
-                res_text = choices[0]["message"].get("content", "").strip()
-                if res_text:
-                    logger.info(f"Đã phản hồi thành công từ Groq REST API ({model_name}).")
-                    return res_text
-        elif res.status_code == 429:
-            logger.warning(f"Groq API rate-limited (429). Chờ 3s...")
-            time.sleep(3)
-    except Exception as e:
-        logger.warning(f"Lỗi khi gọi Groq REST API ({model_name}): {e}")
+            "temperature": 0.2,
+            "max_tokens": 300
+        }
+        try:
+            res = requests.post(url, headers=headers, json=payload, timeout=10)
+            if res.status_code == 200:
+                data = res.json()
+                choices = data.get("choices", [])
+                if choices and "message" in choices[0]:
+                    res_text = choices[0]["message"].get("content", "").strip()
+                    if res_text:
+                        logger.info(f"Đã phản hồi thành công từ Groq REST API ({model_name}).")
+                        return res_text
+            elif res.status_code == 429:
+                logger.warning(f"Groq Key ({active_key[:8]}...) dính rate-limit (429). Chuyển sang Key kế tiếp...")
+                continue
+        except Exception as e:
+            logger.warning(f"Lỗi khi gọi Groq REST API ({model_name}): {e}")
 
     return None
 
@@ -505,7 +511,9 @@ class VisionAnalytics:
 
         objects = self.detect_objects(frame_path)
         ocr_raw = self.extract_ocr_raw(frame_path)
-        ocr_fixed = correct_ocr_text(ocr_raw, config_path=self.config_path)
+        # Không gọi LLM riêng lẻ cho từng frame để tránh spam API.
+        # Việc sửa chính tả & tóm tắt được gộp 90s/1 LLM call ở window_based_summarize()
+        ocr_fixed = ocr_raw
 
         return {
             "frame_path": frame_path,
