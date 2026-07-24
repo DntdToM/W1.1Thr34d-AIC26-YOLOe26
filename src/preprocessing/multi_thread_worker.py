@@ -10,7 +10,7 @@ import json
 import time
 import logging
 from typing import List, Dict, Any, Optional
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import yaml
 import numpy as np
 from tqdm import tqdm
@@ -80,12 +80,9 @@ def parse_timestamp_str(ts_str: str) -> int:
         return 0
 
 
-def match_asr_for_timestamp(frame_ts: int, asr_map: Dict[str, str], tolerance_ms: int = 3000) -> str:
-    """
-    Khớp các phân đoạn ASR có thời gian nằm trong khoảng [start_ms - tolerance, end_ms + tolerance] 
-    tương ứng với timestamp_ms của khung hình.
-    """
-    matched_texts = []
+def preparse_asr_map(asr_map: Dict[str, str]) -> List[Tuple[int, int, str]]:
+    """Pre-parse asr_map chuỗi timestamp ranges sang danh sách Tuple (start_ms, end_ms, text)."""
+    parsed = []
     for ts_range, text in asr_map.items():
         if not text:
             continue
@@ -94,12 +91,18 @@ def match_asr_for_timestamp(frame_ts: int, asr_map: Dict[str, str], tolerance_ms
                 start_str, end_str = [s.strip() for s in ts_range.split(" - ")]
                 start_ms = parse_timestamp_str(start_str)
                 end_ms = parse_timestamp_str(end_str)
-                
-                if (start_ms - tolerance_ms) <= frame_ts <= (end_ms + tolerance_ms):
-                    matched_texts.append(text)
+                parsed.append((start_ms, end_ms, text))
         except Exception:
             continue
-            
+    return parsed
+
+
+def match_asr_for_timestamp(frame_ts: int, parsed_asr_list: List[Tuple[int, int, str]], tolerance_ms: int = 3000) -> str:
+    """Khớp nhanh các phân đoạn ASR dựa trên danh sách Tuple (start_ms, end_ms, text) đã pre-parse."""
+    matched_texts = [
+        text for start_ms, end_ms, text in parsed_asr_list
+        if (start_ms - tolerance_ms) <= frame_ts <= (end_ms + tolerance_ms)
+    ]
     return " ".join(matched_texts).strip()
 
 
@@ -168,6 +171,7 @@ class MultiThreadPipelineWorker:
             # 2. Phân tích Thị giác độc lập (YOLOv9 + OCR) bằng Singleton VisionAnalytics
             raw_keyframes_meta = []
             image_paths = []
+            parsed_asr_list = preparse_asr_map(asr_map)
 
             for meta in keyframes_meta:
                 img_path = meta["saved_path"]
@@ -176,7 +180,7 @@ class MultiThreadPipelineWorker:
                 vision_res = self.vision_analytics.analyze_frame(img_path)
                 
                 frame_ts = meta.get("timestamp_ms", 0)
-                matched_asr = match_asr_for_timestamp(frame_ts, asr_map, tolerance_ms=3000)
+                matched_asr = match_asr_for_timestamp(frame_ts, parsed_asr_list, tolerance_ms=3000)
 
                 meta["objects"] = vision_res.get("objects", [])
                 meta["ocr_raw"] = vision_res.get("ocr_raw", "")
@@ -226,24 +230,38 @@ class MultiThreadPipelineWorker:
             with open(json_metadata_path, "w", encoding="utf-8") as f:
                 json.dump(full_metadata, f, ensure_ascii=False, indent=2)
 
-            try:
-                db_path = self.config.get("paths", {}).get("sqlite_db_path", "processed_data/3_metadata/metadata.db")
-                metadata_db = MetadataDB(db_path=db_path)
-                for item in enriched_keyframes:
-                    metadata_db.insert_frame_metadata({
-                        "video_id": video_name,
-                        "shot_id": item.get("shot_id", 0),
-                        "frame_type": item.get("frame_type", ""),
-                        "frame_idx": item.get("frame_idx", 0),
-                        "timestamp_ms": item.get("timestamp_ms", 0),
-                        "frame_path": item.get("saved_path", ""),
-                        "ocr_text": item.get("ocr_fixed", ""),
-                        "asr_text": item.get("asr_text", ""),
-                        "detected_objects": ", ".join(item.get("objects", [])),
-                        "context_summary": item.get("context_summary", "")
-                    })
-            except Exception as e:
-                logger.warning(f"Lỗi chèn SQLite Metadata: {e}")
+            db_path = self.config.get("paths", {}).get("sqlite_db_path", "processed_data/3_metadata/metadata.db")
+            db_success = False
+            for attempt in range(3):
+                try:
+                    metadata_db = MetadataDB(db_path=db_path)
+                    for item in enriched_keyframes:
+                        metadata_db.insert_frame_metadata({
+                            "video_id": video_name,
+                            "shot_id": item.get("shot_id", 0),
+                            "frame_type": item.get("frame_type", ""),
+                            "frame_idx": item.get("frame_idx", 0),
+                            "timestamp_ms": item.get("timestamp_ms", 0),
+                            "frame_path": item.get("saved_path", ""),
+                            "ocr_text": item.get("ocr_fixed", ""),
+                            "asr_text": item.get("asr_text", ""),
+                            "detected_objects": ", ".join(item.get("objects", [])),
+                            "context_summary": item.get("context_summary", "")
+                        })
+                    db_success = True
+                    break
+                except Exception as e:
+                    logger.warning(f"Thử chèn SQLite lần {attempt + 1}/3 cho {video_name} thất bại: {e}")
+                    time.sleep(1)
+
+            if not db_success:
+                logger.error(f"[LỖI NGHIÊM TRỌNG] Không thể chèn SQLite Metadata cho video {video_name} sau 3 lần thử.")
+                return {
+                    "video_name": video_name,
+                    "video_path": video_path,
+                    "status": "failed",
+                    "error": "SQLite insertion failed after 3 retries"
+                }
 
             elapsed = time.time() - start_time
             logger.info(f"=== [HOÀN THÀNH] {video_name} trong {elapsed:.2f}s | Metadata: {json_metadata_path} ===")

@@ -1,11 +1,4 @@
-"""
-Vision Analytics Module (YOLOv9 & EasyOCR / PaddleOCR + Window-Based LLM Context Summarization + Gemini API)
-- Trích xuất đặc trưng độc lập: YOLOv9 (Object Detection) & EasyOCR / PaddleOCR (Text Reading).
-- Tổng hợp ngữ cảnh theo cửa sổ (Window-Based): Gọi Gemini Flash API ĐÚNG 1 LẦN cho mỗi batch cửa sổ
-  để sửa lỗi OCR, lọc nhiễu vật thể và viết metadata tổng hợp (< 50 từ) mô tả bối cảnh chung.
-- Rate-limit Gemini API: 4s delay giữa các lần gọi để tránh bị chặn bởi Free Tier (15 req/min).
-- Tự động phát hiện & vô hiệu hóa Ollama fallback khi chạy trên Kaggle/Cloud (tránh spam Connection refused).
-"""
+"""Vision Analytics Module (YOLOv9 & EasyOCR / PaddleOCR + Window-Based LLM Context Summarization)"""
 
 import os
 import time
@@ -17,23 +10,6 @@ import torch
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("VisionAnalytics")
-
-# === Auto-detect Ollama availability (chỉ kiểm tra 1 lần duy nhất khi import module) ===
-_OLLAMA_AVAILABLE: Optional[bool] = None
-
-def _check_ollama_available(ollama_url: str = "http://localhost:11434") -> bool:
-    """Kiểm tra Ollama có đang chạy không. Chỉ gọi 1 lần duy nhất, cache kết quả."""
-    global _OLLAMA_AVAILABLE
-    if _OLLAMA_AVAILABLE is not None:
-        return _OLLAMA_AVAILABLE
-    try:
-        res = requests.get(f"{ollama_url}/api/tags", timeout=2)
-        _OLLAMA_AVAILABLE = res.status_code == 200
-    except Exception:
-        _OLLAMA_AVAILABLE = False
-    if not _OLLAMA_AVAILABLE:
-        logger.info("Ollama Local LLM không khả dụng (Kaggle/Cloud). Đã vô hiệu hóa fallback Ollama.")
-    return _OLLAMA_AVAILABLE
 
 
 def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:

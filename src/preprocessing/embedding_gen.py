@@ -163,6 +163,9 @@ class EmbeddingGenerator:
         except Exception as e:
             logger.error(f"Lỗi trích xuất batch image embeddings: {e}")
             raise e
+        finally:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     def get_image_embedding(self, image: Union[str, Image.Image]) -> np.ndarray:
         """Trích xuất 1 vector embedding từ 1 ảnh duy nhất (Shape [768,])."""
@@ -187,7 +190,7 @@ class EmbeddingGenerator:
                     show_progress_bar=False,
                     normalize_embeddings=True
                 )
-                return np.array(embeddings, dtype=np.float32)
+                res_array = np.array(embeddings, dtype=np.float32)
             else:
                 inputs = self.text_tokenizer(
                     texts,
@@ -206,10 +209,14 @@ class EmbeddingGenerator:
                     pooled = sum_embeddings / sum_mask
                     pooled = pooled / pooled.norm(dim=-1, keepdim=True)
                     
-                return pooled.float().cpu().numpy().astype(np.float32)
+                res_array = pooled.float().cpu().numpy().astype(np.float32)
+            return res_array
         except Exception as e:
             logger.error(f"Lỗi trích xuất batch text embeddings: {e}")
             raise e
+        finally:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     def get_text_embedding(self, text: str) -> np.ndarray:
         """Trích xuất 1 vector embedding cho 1 câu văn bản (Shape [1024,])."""
