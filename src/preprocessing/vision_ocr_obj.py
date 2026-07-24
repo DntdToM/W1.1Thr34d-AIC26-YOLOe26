@@ -258,9 +258,9 @@ def summarize_window_with_llm(window_data_str: str, config_path: str = "config.y
     llm_cfg = config.get("models", {}).get("llm", {})
 
     prompt = (
-        f"Dưới đây là dữ liệu thô trích xuất từ các frames trong 30-90 giây của một video:\n"
+        f"Dữ liệu thô từ các khung hình video trong khoảng thời gian này:\n"
         f"{window_data_str}\n\n"
-        "Hãy sửa lỗi chính tả OCR tiếng Việt, loại bỏ các vật thể nhiễu/lặp lại, và viết một đoạn metadata tổng hợp ngắn gọn (< 50 từ) mô tả bối cảnh chung."
+        "Hãy tóm tắt ngắn gọn bối cảnh và diễn biến chính thành 1 đoạn văn tiếng Việt duy nhất (< 40 từ)."
     )
 
     groq_key = os.getenv("GROQ_API_KEY") or llm_cfg.get("groq_api_key", "")
