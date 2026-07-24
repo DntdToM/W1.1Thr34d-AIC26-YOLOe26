@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 from src.preprocessing.video_segment import VideoSegmenter
 from src.preprocessing.audio_asr import AudioASRProcessor
-from src.preprocessing.vision_ocr_obj import VisionAnalytics, window_based_summarize
+from src.preprocessing.vision_ocr_obj import VisionAnalytics, window_based_summarize, COCO_VI_MAP
 from src.preprocessing.embedding_gen import EmbeddingGenerator
 from src.database.metadata_db import MetadataDB
 
@@ -191,14 +191,14 @@ class MultiThreadPipelineWorker:
 
             texts_for_embedding = []
             for meta in enriched_keyframes:
-                ctx_sum = meta.get("context_summary", "")
-                combined_text = (
-                    f"Objects: {', '.join(meta['objects'])}. "
-                    f"OCR: {meta['ocr_fixed']}. "
-                    f"ASR: {meta['asr_text']}. "
-                    f"Context: {ctx_sum}"
-                )
-                texts_for_embedding.append(combined_text.strip())
+                objs_vi = [COCO_VI_MAP.get(o, o) for o in meta.get("objects", [])]
+                obj_str = f"Vật thể: {', '.join(objs_vi)}. " if objs_vi else ""
+                ocr_str = f"Chữ màn hình: {meta.get('ocr_fixed', '')}. " if meta.get("ocr_fixed") else ""
+                asr_str = f"Lời nói: {meta.get('asr_text', '')}. " if meta.get("asr_text") else ""
+                ctx_str = f"Bối cảnh: {meta.get('context_summary', '')}" if meta.get("context_summary") else ""
+
+                combined_text = f"{obj_str}{ocr_str}{asr_str}{ctx_str}".strip()
+                texts_for_embedding.append(combined_text if combined_text else "Video keyframe")
 
             # 4. Trích xuất Vector Embeddings bằng Singleton EmbeddingGenerator (SigLIP 2 & BGE-M3)
             logger.info(f"[{video_name}] Đang tạo Image & Text Embeddings...")
