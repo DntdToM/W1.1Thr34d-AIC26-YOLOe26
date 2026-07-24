@@ -51,6 +51,7 @@ class DynamicSceneAwareReranker:
     def rerank_and_group_clips(
         self,
         candidates: List[Dict[str, Any]],
+        query: Optional[str] = None,
         max_gap_ms: Optional[int] = None,
         top_k_clips: Optional[int] = None
     ) -> List[Dict[str, Any]]:
@@ -60,7 +61,8 @@ class DynamicSceneAwareReranker:
         3. Gom nhóm theo video_id và shot_id.
         4. Tự động gộp thêm các shots liền kề nếu khoảng cách timestamp <= max_gap_ms (đọc từ config.yaml).
         5. Chấm điểm theo cụm bằng Max-Pooling + Average-Pooling Fusion.
-        6. Trả về danh sách các Clips (TRAKE-ready).
+        6. Áp dụng Temporal Reranking: Nhân 2.0x điểm số nếu query chứa từ khóa thời gian ('trước khi', 'sau khi', 'rồi') và timestamp_A < timestamp_B.
+        7. Trả về danh sách các Clips (TRAKE-ready).
         """
         if not candidates:
             return []
@@ -69,6 +71,13 @@ class DynamicSceneAwareReranker:
             max_gap_ms = self.default_max_gap_ms
         if top_k_clips is None:
             top_k_clips = self.default_top_k
+
+        # Kiểm tra xem truy vấn có chứa từ khóa thời gian hay không
+        temporal_keywords = ["trước khi", "sau khi", "rồi", "sau đó", "trước đó", "bắt đầu", "kết thúc", "sau cùng"]
+        is_temporal_query = False
+        if query and isinstance(query, str):
+            query_lower = query.lower()
+            is_temporal_query = any(kw in query_lower for kw in temporal_keywords)
 
         # 1. Truy vấn metadata bổ sung cho từng candidate frame từ SQLite DB
         enriched_candidates = []
@@ -151,11 +160,15 @@ class DynamicSceneAwareReranker:
 
                 clip_score = max_score * 0.7 + avg_score * 0.3
 
-                # Temporal Order Bonus: Neu clip chua nhieu keyframe duoc tra ve va co thu tu timestamp tang dan
+                # Temporal Reranking Logic:
+                # Nếu là Temporal Query ("trước khi", "sau khi", "rồi") và thứ tự timestamp_A < timestamp_B -> Thưởng 2.0x điểm
                 if len(event_frames) > 1:
                     sorted_by_ts = sorted(event_frames, key=lambda x: x["timestamp_ms"])
                     if sorted_by_ts == event_frames:
-                        clip_score *= 1.15  # 15% bonus for naturally ordered temporal sequence
+                        if is_temporal_query:
+                            clip_score *= 2.0  # Thưởng gấp đôi điểm cho đúng thứ tự thời gian theo truy vấn
+                        else:
+                            clip_score *= 1.15  # Thưởng 15% cho clip có thứ tự tự nhiên khi query thường
 
                 min_ts = min(f["timestamp_ms"] for f in event_frames)
                 max_ts = max(f["timestamp_ms"] for f in event_frames)
