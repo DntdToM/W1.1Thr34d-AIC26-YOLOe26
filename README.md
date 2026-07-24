@@ -152,4 +152,4 @@ processed_data/
 
 ## 🛡️ 6. Giấy phép & Đóng góp (License)
 
-Dự án thuộc bản quyền đội ngũ phát triển **AIC 2026 Retrieval Team**. Nghiêm cấm sao chép hoặc thương mại hóa khi chưa có sự đồng ý.
+Dự án thuộc bản quyền đội ngũ phát triển **W1.1Thr34d**. Nghiêm cấm sao chép hoặc thương mại hóa khi chưa có sự đồng ý.
