@@ -44,13 +44,23 @@ def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
 
 
 COCO_VI_MAP = {
-    "person": "người", "car": "ô tô", "motorcycle": "xe máy", "airplane": "máy bay",
-    "bus": "xe buýt", "train": "tàu hỏa", "truck": "xe tải", "boat": "thuyền",
-    "traffic light": "đèn giao thông", "bench": "ghế", "bird": "chim", "cat": "mèo",
-    "dog": "chó", "backpack": "ba lô", "umbrella": "ô dù", "handbag": "túi xách",
-    "tie": "cà vạt", "suitcase": "va li", "bottle": "chai nước", "cup": "cốc",
-    "chair": "ghế", "couch": "ghế sofa", "potted plant": "chậu cây", "tv": "tivi",
-    "laptop": "máy tính xách tay", "cell phone": "điện thoại", "clock": "đồng hồ", "book": "sách"
+    "person": "người", "bicycle": "xe đạp", "car": "ô tô", "motorcycle": "xe máy", "airplane": "máy bay",
+    "bus": "xe buýt", "train": "tàu hỏa", "truck": "xe tải", "boat": "thuyền", "traffic light": "đèn giao thông",
+    "fire hydrant": "vòi chữa cháy", "stop sign": "biển dừng", "parking meter": "đồng hồ đỗ xe", "bench": "ghế dài",
+    "bird": "chim", "cat": "mèo", "dog": "chó", "horse": "ngựa", "sheep": "cừu", "cow": "bò", "elephant": "voi",
+    "bear": "gấu", "zebra": "ngựa vằn", "giraffe": "hươu cao cổ", "backpack": "ba lô", "umbrella": "ô dù",
+    "handbag": "túi xách", "tie": "cà vạt", "suitcase": "va li", "frisbee": "đĩa bay", "skis": "gậy trượt tuyết",
+    "snowboard": "ván trượt tuyết", "sports ball": "bóng thể thao", "kite": "diều", "baseball bat": "gậy bóng chày",
+    "baseball glove": "găng tay bóng chày", "skateboard": "ván trượt", "surfboard": "ván lướt sóng",
+    "tennis racket": "vợt tennis", "bottle": "chai nước", "wine glass": "ly rượu", "cup": "cốc", "fork": "nĩa",
+    "knife": "dao", "spoon": "thìa", "bowl": "bát", "banana": "chuối", "apple": "táo", "sandwich": "bánh mì sandwich",
+    "orange": "cam", "broccoli": "súp lơ", "carrot": "củ cà rốt", "hot dog": "bánh mì xúc xích", "pizza": "bánh pizza",
+    "donut": "bánh donut", "cake": "bánh ngọt", "chair": "ghế", "couch": "ghế sofa", "potted plant": "chậu cây",
+    "bed": "giường", "dining table": "bàn ăn", "toilet": "bồn cầu", "tv": "tivi", "laptop": "máy tính xách tay",
+    "mouse": "chuột máy tính", "remote": "điều khiển", "keyboard": "bàn phím", "cell phone": "điện thoại",
+    "microwave": "lò vi sóng", "oven": "lò nướng", "toaster": "máy nướng bánh mì", "sink": "bồn rửa",
+    "refrigerator": "tủ lạnh", "book": "sách", "clock": "đồng hồ", "vase": "bình hoa", "scissors": "kéo",
+    "teddy bear": "gấu bông", "hair drier": "máy sấy tóc", "toothbrush": "bàn chải đánh răng"
 }
 
 
@@ -96,7 +106,7 @@ def call_groq_api(prompt: str, groq_key: str, model_name: str = "llama-3.1-8b-in
         "1. CHỈ XUẤT ĐÚNG 1 ĐOẠN VĂN TIẾNG VIỆT THUẦN (TỐI ĐA 40 TỪ) MÔ TẢ NỘI DUNG VÀ BỐI CẢNH NỔI BẬT.\n"
         "2. TUYỆT ĐỐI KHÔNG CHÀO HỎI, KHÔNG LỜI DẪN ('Dưới đây là...', 'Sau khi xử lý...', 'Kết quả...').\n"
         "3. TUYỆT ĐỐI KHÔNG SỬ DỤNG GẠCH ĐẦU DÒNG, DANH SÁCH, ĐÁNH SỐ THỨ TỰ HAY BẤT KỲ ĐỊNH DẠNG MARKDOWN NÀO.\n"
-        "4. TỰ ĐỘNG SỬA LỖI CHÍNH TẢ CHO VĂN BẢN OCR NẾU CÓ."
+        "4. TỰ ĐỘNG SỬA LỖI CHÍNH TẢ DỰA TRÊN CẢ VĂN BẢN OCR VÀ DỊCH BẤT KỲ VẬT THỂ TIẾNG ANH NÀO SANG TIẾNG VIỆT."
     )
 
     for active_key in keys_list:
