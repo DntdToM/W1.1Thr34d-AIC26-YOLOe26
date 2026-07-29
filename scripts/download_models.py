@@ -40,12 +40,6 @@ models_to_download = [
         "type": "phowhisper"
     },
     {
-        "name": "TransNetV2 Weights",
-        "repo_id": "https://github.com/soCzech/TransNetV2/raw/master/inference-pytorch/transnetv2-pytorch-weights.pth",
-        "save_dir": os.path.join(PROJECT_ROOT, "src", "preprocessing", "weights", "transnetv2-pytorch-weights.pth"),
-        "type": "url"
-    },
-    {
         "name": "Silero VAD",
         "repo_id": "snakers4/silero-vad",
         "save_dir": os.path.join(MODELS_DIR, "torch_hub"),
