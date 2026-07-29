@@ -10,8 +10,9 @@ PyYAML>=6.0.1
 faiss-cpu>=1.7.4
 
 # Vision & OCR & ASR Models
-ultralytics>=8.1.0       # YOLOv9 support
-easyocr>=1.7.0
+ultralytics>=8.1.0
+paddlepaddle>=2.6.0
+paddleocr>=2.8.0
 sentencepiece>=0.2.0
 protobuf>=4.25.0
 transformers>=4.38.0
