@@ -1,4 +1,4 @@
-"""FAISS Vector Index Management & Global Indexing Script."""
+"""Hybrid Vector Database for Dual FAISS GPU Indices and PyTorch SpMM."""
 
 import os
 import glob
@@ -8,9 +8,11 @@ from typing import List, Tuple, Optional, Dict, Any
 import numpy as np
 import faiss
 import yaml
+import scipy.sparse as sp
+import torch
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("VectorDB")
+logger = logging.getLogger("HybridVectorDB")
 
 
 def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
@@ -20,133 +22,177 @@ def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
     return {}
 
 
-class VectorDB:
-    """FAISS Index wrapper for vector similarity search."""
+class HybridVectorDB:
+    """Manages Vision (Dense), Text (Dense), and Text (Sparse) indices."""
 
-    def __init__(self, dimension: int = 768, metric_type: str = "COSINE", config_path: str = "config.yaml"):
+    def __init__(self, config_path: str = "config.yaml"):
         self.config = load_config(config_path)
-        faiss_cfg = self.config.get("faiss", {})
+        self.db_dir = self.config.get("paths", {}).get("faiss_index_path", "processed_data/2_embeddings").replace("faiss_index.bin", "")
+        self.db_dir = self.db_dir if os.path.isdir(self.db_dir) else os.path.dirname(self.db_dir)
         
-        self.dimension = faiss_cfg.get("dimension", dimension)
-        self.index_path = self.config.get("paths", {}).get("faiss_index_path", "processed_data/2_embeddings/faiss_index.bin")
-        self.mapping_path = os.path.join(os.path.dirname(self.index_path), "faiss_mapping.json")
+        self.vision_index_path = os.path.join(self.db_dir, "vision_faiss.bin")
+        self.text_dense_index_path = os.path.join(self.db_dir, "text_dense_faiss.bin")
+        self.text_sparse_matrix_path = os.path.join(self.db_dir, "text_sparse.npz")
+        self.mapping_path = os.path.join(self.db_dir, "faiss_mapping.json")
 
-        self.index = faiss.IndexFlatIP(self.dimension)
+        self.vision_index = None
+        self.text_dense_index = None
+        self.text_sparse_matrix = None
         self.mapping: List[Dict[str, Any]] = []
 
-        if os.path.exists(self.index_path) and os.path.exists(self.mapping_path):
-            self.load_index(self.index_path, self.mapping_path)
+        self.res = None
+        if faiss.get_num_gpus() > 0:
+            self.res = faiss.StandardGpuResources()
+            logger.info("FAISS GPU Resources initialized.")
 
-    def add_vectors(self, vectors: np.ndarray, metadata_list: Optional[List[Dict[str, Any]]] = None):
-        """Add normalized feature vectors and metadata mappings into FAISS index."""
-        if vectors is None or vectors.size == 0:
+    def _create_index(self, dimension: int, ntotal: int) -> faiss.Index:
+        """Create Auto-Scaling FAISS Index (GPU if available)."""
+        if ntotal > 1500000:
+            nlist = int(4 * np.sqrt(ntotal))
+            index = faiss.index_factory(dimension, f"IVF{nlist},Flat", faiss.METRIC_INNER_PRODUCT)
+            logger.info(f"Created IndexIVFFlat for {ntotal} items (nlist={nlist})")
+        else:
+            index = faiss.IndexFlatIP(dimension)
+            logger.info(f"Created IndexFlatIP for {ntotal} items")
+
+        if self.res:
+            try:
+                index = faiss.index_cpu_to_gpu(self.res, 0, index)
+            except Exception as e:
+                logger.warning(f"Could not move index to GPU: {e}")
+        return index
+
+    def build_from_data(self, vision_vectors: np.ndarray, text_dense_vectors: np.ndarray, text_sparse_matrix: sp.csr_matrix, metadata_list: List[Dict[str, Any]]):
+        """Train and add vectors to indices."""
+        ntotal = len(vision_vectors)
+        if ntotal == 0:
             return
 
-        vectors = vectors.astype(np.float32)
-        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+        # 1. Vision Index
+        self.vision_index = self._create_index(vision_vectors.shape[1], ntotal)
+        vision_vecs = vision_vectors.astype(np.float32)
+        norms = np.linalg.norm(vision_vecs, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
-        vectors = vectors / norms
+        vision_vecs = vision_vecs / norms
+        if not self.vision_index.is_trained:
+            self.vision_index.train(vision_vecs)
+        self.vision_index.add(vision_vecs)
 
-        if not self.index.is_trained:
-            self.index.train(vectors)
-            
-        self.index.add(vectors)
+        # 2. Text Dense Index
+        self.text_dense_index = self._create_index(text_dense_vectors.shape[1], ntotal)
+        text_vecs = text_dense_vectors.astype(np.float32)
+        norms = np.linalg.norm(text_vecs, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        text_vecs = text_vecs / norms
+        if not self.text_dense_index.is_trained:
+            self.text_dense_index.train(text_vecs)
+        self.text_dense_index.add(text_vecs)
 
-        if metadata_list:
-            self.mapping.extend(metadata_list)
-
-    def search(self, query_vector: np.ndarray, top_k: int = 100) -> Tuple[np.ndarray, np.ndarray]:
-        """Query Top-K most similar vectors via Inner Product similarity."""
-        query_vector = query_vector.astype(np.float32).reshape(1, -1)
-        norm = np.linalg.norm(query_vector)
-        if norm > 0:
-            query_vector = query_vector / norm
-            
-        k = min(top_k, self.index.ntotal) if self.index.ntotal > 0 else top_k
-        if self.index.ntotal == 0:
-            return np.array([]), np.array([])
-            
-        distances, indices = self.index.search(query_vector, k)
-        return distances[0], indices[0]
-
-    def search_with_metadata(self, query_vector: np.ndarray, top_k: int = 100) -> List[Dict[str, Any]]:
-        """Query Top-K results and return mapped metadata dictionaries with relevance scores."""
-        distances, indices = self.search(query_vector, top_k=top_k)
-        results = []
+        # 3. Text Sparse Matrix
+        self.text_sparse_matrix = text_sparse_matrix
         
-        for dist, idx in zip(distances, indices):
-            if idx < 0 or idx >= len(self.mapping):
-                continue
-            meta = dict(self.mapping[idx])
-            meta["score"] = float(dist)
-            results.append(meta)
+        # 4. Metadata
+        self.mapping = metadata_list
 
-        return results
-
-    def save_index(self, index_path: Optional[str] = None, mapping_path: Optional[str] = None):
-        """Persist FAISS index binary and metadata mapping JSON file."""
-        idx_p = index_path or self.index_path
-        map_p = mapping_path or self.mapping_path
+    def save_indices(self):
+        """Persist indices and metadata to disk."""
+        os.makedirs(self.db_dir, exist_ok=True)
         
-        os.makedirs(os.path.dirname(idx_p), exist_ok=True)
-        faiss.write_index(self.index, idx_p)
-        
-        with open(map_p, "w", encoding="utf-8") as f:
+        if self.vision_index:
+            cpu_idx = faiss.index_gpu_to_cpu(self.vision_index) if self.res else self.vision_index
+            faiss.write_index(cpu_idx, self.vision_index_path)
+            
+        if self.text_dense_index:
+            cpu_idx = faiss.index_gpu_to_cpu(self.text_dense_index) if self.res else self.text_dense_index
+            faiss.write_index(cpu_idx, self.text_dense_index_path)
+            
+        if self.text_sparse_matrix is not None:
+            sp.save_npz(self.text_sparse_matrix_path, self.text_sparse_matrix)
+            
+        with open(self.mapping_path, "w", encoding="utf-8") as f:
             json.dump(self.mapping, f, ensure_ascii=False, indent=2)
             
-        logger.info(f"FAISS index saved successfully ({self.index.ntotal} vectors) to '{idx_p}'.")
+        logger.info(f"Hybrid indices saved to '{self.db_dir}'")
 
-    def load_index(self, index_path: Optional[str] = None, mapping_path: Optional[str] = None):
-        """Load FAISS index binary and metadata mapping JSON file."""
-        idx_p = index_path or self.index_path
-        map_p = mapping_path or self.mapping_path
-        
-        if os.path.exists(idx_p):
-            self.index = faiss.read_index(idx_p)
-            logger.info(f"FAISS index loaded from '{idx_p}' ({self.index.ntotal} vectors).")
+    def load_indices(self):
+        """Load indices and metadata from disk."""
+        if os.path.exists(self.vision_index_path):
+            cpu_idx = faiss.read_index(self.vision_index_path)
+            self.vision_index = faiss.index_cpu_to_gpu(self.res, 0, cpu_idx) if self.res else cpu_idx
             
-        if os.path.exists(map_p):
-            with open(map_p, "r", encoding="utf-8") as f:
+        if os.path.exists(self.text_dense_index_path):
+            cpu_idx = faiss.read_index(self.text_dense_index_path)
+            self.text_dense_index = faiss.index_cpu_to_gpu(self.res, 0, cpu_idx) if self.res else cpu_idx
+            
+        if os.path.exists(self.text_sparse_matrix_path):
+            self.text_sparse_matrix = sp.load_npz(self.text_sparse_matrix_path)
+            
+        if os.path.exists(self.mapping_path):
+            with open(self.mapping_path, "r", encoding="utf-8") as f:
                 self.mapping = json.load(f)
-            logger.info(f"FAISS metadata mapping loaded from '{map_p}' ({len(self.mapping)} entries).")
+                
+        logger.info(f"Hybrid indices loaded. Mapping size: {len(self.mapping)}")
 
+    def get_sparse_tensor(self) -> torch.Tensor:
+        """Get the text sparse matrix as a PyTorch sparse tensor."""
+        if self.text_sparse_matrix is None:
+            return None
+        
+        coo = self.text_sparse_matrix.tocoo()
+        indices = np.vstack((coo.row, coo.col))
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        tensor = torch.sparse_coo_tensor(
+            indices,
+            coo.data,
+            size=coo.shape,
+            dtype=torch.float32
+        ).to(device)
+        return tensor
 
 def build_global_index(
     embeddings_dir: str = "processed_data/2_embeddings",
-    metadata_dir: str = "processed_data/3_metadata",
-    index_output_path: str = "processed_data/2_embeddings/faiss_index.bin"
-) -> VectorDB:
-    """Consolidate embedding matrices and build a unified global FAISS index."""
-    logger.info("=== STARTING GLOBAL FAISS INDEXING ===")
+    metadata_dir: str = "processed_data/3_metadata"
+) -> HybridVectorDB:
+    logger.info("=== STARTING HYBRID GLOBAL INDEXING ===")
+    
+    # We will gather vision (.npy), text_dense (.npy) and text_sparse (.npz)
     img_emb_files = sorted(glob.glob(os.path.join(embeddings_dir, "*_img_emb.npy")))
-
+    
     if not img_emb_files:
         logger.warning(f"No *_img_emb.npy files detected in '{embeddings_dir}'.")
-        vdb = VectorDB(dimension=768)
-        return vdb
+        return HybridVectorDB()
 
-    all_vectors = []
+    all_vision = []
+    all_text_dense = []
+    all_text_sparse = []
     all_metadata = []
 
-    for emb_file in img_emb_files:
-        video_name = os.path.basename(emb_file).replace("_img_emb.npy", "")
+    for img_file in img_emb_files:
+        video_name = os.path.basename(img_file).replace("_img_emb.npy", "")
+        text_dense_file = os.path.join(embeddings_dir, f"{video_name}_text_emb.npy")
+        text_sparse_file = os.path.join(embeddings_dir, f"{video_name}_text_sparse.npz")
         meta_json_path = os.path.join(metadata_dir, f"{video_name}_metadata.json")
 
-        if not os.path.exists(meta_json_path):
-            logger.warning(f"Metadata file '{meta_json_path}' not found for video '{video_name}'. Skipping.")
+        if not (os.path.exists(text_dense_file) and os.path.exists(text_sparse_file) and os.path.exists(meta_json_path)):
+            logger.warning(f"Missing required embedding or metadata for '{video_name}'. Skipping.")
             continue
 
         try:
-            vecs = np.load(emb_file).astype(np.float32)
+            v_vecs = np.load(img_file).astype(np.float32)
+            t_vecs = np.load(text_dense_file).astype(np.float32)
+            t_sparse = sp.load_npz(text_sparse_file)
+            
             with open(meta_json_path, "r", encoding="utf-8") as f:
                 meta_json = json.load(f)
                 
             keyframes = meta_json.get("keyframes", [])
             
-            if len(vecs) != len(keyframes):
-                logger.warning(f"Vector count ({len(vecs)}) and keyframe metadata count ({len(keyframes)}) mismatch for video '{video_name}'.")
-
-            all_vectors.append(vecs)
+            if len(v_vecs) != len(keyframes):
+                continue
+                
+            all_vision.append(v_vecs)
+            all_text_dense.append(t_vecs)
+            all_text_sparse.append(t_sparse)
             
             for kf in keyframes:
                 all_metadata.append({
@@ -163,27 +209,23 @@ def build_global_index(
                 })
 
         except Exception as e:
-            logger.error(f"Error processing embedding file '{emb_file}': {e}")
+            logger.error(f"Error processing video '{video_name}': {e}")
 
-    if not all_vectors:
-        logger.warning("No valid vectors aggregated for indexing.")
-        return VectorDB(dimension=768)
+    if not all_vision:
+        return HybridVectorDB()
 
-    stacked_vectors = np.vstack(all_vectors)
-    dimension = stacked_vectors.shape[1]
+    stacked_vision = np.vstack(all_vision)
+    stacked_text_dense = np.vstack(all_text_dense)
+    stacked_text_sparse = sp.vstack(all_text_sparse)
 
-    logger.info(f"Aggregated {stacked_vectors.shape[0]} total vectors (dimension={dimension}). Adding to FAISS IndexFlatIP...")
-
-    vector_db = VectorDB(dimension=dimension)
-    vector_db.add_vectors(stacked_vectors, all_metadata)
+    db = HybridVectorDB()
+    db.build_from_data(stacked_vision, stacked_text_dense, stacked_text_sparse, all_metadata)
+    db.save_indices()
     
-    mapping_path = os.path.join(os.path.dirname(index_output_path), "faiss_mapping.json")
-    vector_db.save_index(index_output_path, mapping_path)
-    
-    logger.info("=== GLOBAL FAISS INDEXING COMPLETE ===")
-    return vector_db
-
+    logger.info("=== HYBRID GLOBAL INDEXING COMPLETE ===")
+    return db
 
 if __name__ == "__main__":
     vdb = build_global_index()
-    print(f"Global Index Total Vectors: {vdb.index.ntotal}")
+    if vdb.vision_index:
+        print(f"Global Index Total Vectors: {vdb.vision_index.ntotal}")

@@ -19,27 +19,6 @@ def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
     return {}
 
 
-COCO_VI_MAP = {
-    "person": "người", "bicycle": "xe đạp", "car": "ô tô", "motorcycle": "xe máy", "airplane": "máy bay",
-    "bus": "xe buýt", "train": "tàu hỏa", "truck": "xe tải", "boat": "thuyền", "traffic light": "đèn giao thông",
-    "fire hydrant": "vòi chữa cháy", "stop sign": "biển dừng", "parking meter": "đồng hồ đỗ xe", "bench": "ghế dài",
-    "bird": "chim", "cat": "mèo", "dog": "chó", "horse": "ngựa", "sheep": "cừu", "cow": "bò", "elephant": "voi",
-    "bear": "gấu", "zebra": "ngựa vằn", "giraffe": "hươu cao cổ", "backpack": "ba lô", "umbrella": "ô dù",
-    "handbag": "túi xách", "tie": "cà vạt", "suitcase": "va li", "frisbee": "đĩa bay", "skis": "gậy trượt tuyết",
-    "snowboard": "ván trượt tuyết", "sports ball": "bóng thể thao", "kite": "diều", "baseball bat": "gậy bóng chày",
-    "baseball glove": "găng tay bóng chày", "skateboard": "ván trượt", "surfboard": "ván lướt sóng",
-    "tennis racket": "vợt tennis", "bottle": "chai nước", "wine glass": "ly rượu", "cup": "cốc", "fork": "nĩa",
-    "knife": "dao", "spoon": "thìa", "bowl": "bát", "banana": "chuối", "apple": "táo", "sandwich": "bánh mì sandwich",
-    "orange": "cam", "broccoli": "súp lơ", "carrot": "củ cà rốt", "hot dog": "bánh mì xúc xích", "pizza": "bánh pizza",
-    "donut": "bánh donut", "cake": "bánh ngọt", "chair": "ghế", "couch": "ghế sofa", "potted plant": "chậu cây",
-    "bed": "giường", "dining table": "bàn ăn", "toilet": "bồn cầu", "tv": "tivi", "laptop": "máy tính xách tay",
-    "mouse": "chuột máy tính", "remote": "điều khiển", "keyboard": "bàn phím", "cell phone": "điện thoại",
-    "microwave": "lò vi sóng", "oven": "lò nướng", "toaster": "máy nướng bánh mì", "sink": "bồn rửa",
-    "refrigerator": "tủ lạnh", "book": "sách", "clock": "đồng hồ", "vase": "bình hoa", "scissors": "kéo",
-    "teddy bear": "gấu bông", "hair drier": "máy sấy tóc", "toothbrush": "bàn chải đánh răng"
-}
-
-
 def _clean_llm_response(text: str) -> str:
     """Sanitize LLM output by removing intro phrases and markdown list formatting."""
     if not text:
@@ -278,6 +257,7 @@ def window_based_summarize(frames_data: List[Dict[str, Any]], window_size: Optio
         all_objects = []
         all_ocr = []
         
+        all_audio = []
         for win_idx in batch_indices:
             win_frames = windows[win_idx]
             batch_frames.extend(win_frames)
@@ -292,15 +272,23 @@ def window_based_summarize(frames_data: List[Dict[str, Any]], window_size: Optio
                 ocr_text = f.get("ocr_fixed") or f.get("ocr_raw") or ""
                 if ocr_text.strip():
                     all_ocr.append(ocr_text.strip())
+                    
+                asr_text = f.get("asr_text", "")
+                audio_event = f.get("audio_event", "")
+                if asr_text:
+                    all_audio.append(asr_text)
+                if audio_event:
+                    all_audio.append(audio_event)
 
         unique_objects = list(set(all_objects))
-        objects_vi = [COCO_VI_MAP.get(obj, obj) for obj in unique_objects]
         unique_ocr = list(set(all_ocr))
+        unique_audio = list(set(all_audio))
 
         window_data_str = (
             f"Khoảng thời gian: {batch_start_sec}s - {batch_end_sec}s.\n"
-            f"Vật thể xuất hiện: {', '.join(objects_vi) if objects_vi else 'Không có'}.\n"
-            f"Văn bản OCR đọc được: {' | '.join(unique_ocr) if unique_ocr else 'Không có'}."
+            f"Vật thể xuất hiện: {', '.join(unique_objects) if unique_objects else 'Không có'}.\n"
+            f"Văn bản OCR đọc được: {' | '.join(unique_ocr) if unique_ocr else 'Không có'}.\n"
+            f"Âm thanh/Lời nói: {' | '.join(unique_audio) if unique_audio else 'Không có'}."
         )
 
         logger.info(f"Summarizing LLM context batch {batch_num}/{total_batches} [{batch_start_sec}s - {batch_end_sec}s] ({len(batch_frames)} frames)...")
@@ -312,8 +300,23 @@ def window_based_summarize(frames_data: List[Dict[str, Any]], window_size: Optio
     return frames_data
 
 
+def boxes_intersect(ocr_poly, yolo_box):
+    """Check if OCR polygon intersects with YOLO bounding box."""
+    ocr_xs = [pt[0] for pt in ocr_poly]
+    ocr_ys = [pt[1] for pt in ocr_poly]
+    ocr_xmin, ocr_xmax = min(ocr_xs), max(ocr_xs)
+    ocr_ymin, ocr_ymax = min(ocr_ys), max(ocr_ys)
+    
+    yolo_xmin, yolo_ymin, yolo_xmax, yolo_ymax = yolo_box
+    
+    if ocr_xmax < yolo_xmin or ocr_xmin > yolo_xmax:
+        return False
+    if ocr_ymax < yolo_ymin or ocr_ymin > yolo_ymax:
+        return False
+    return True
+
 class VisionAnalytics:
-    """Object detection via YOLOv9 and Vietnamese OCR text extraction via EasyOCR / PaddleOCR."""
+    """Object detection via YOLOE-26 and Vietnamese OCR text extraction via PaddleOCR."""
 
     def __init__(self, config_path: str = "config.yaml"):
         self.config_path = config_path
@@ -321,13 +324,12 @@ class VisionAnalytics:
         obj_cfg = self.config.get("models", {}).get("object_detection", {})
         ocr_cfg = self.config.get("models", {}).get("ocr", {})
 
-        self.yolo_model_path = obj_cfg.get("yolo_model", "yolov9c.pt")
-        self.conf_threshold = obj_cfg.get("confidence_threshold", 0.35)
+        self.yolo_model_path = obj_cfg.get("yolo_model", "yoloe26.pt")
+        self.conf_threshold = 0.05  # Low threshold to capture small objects, NMS active
         self.ocr_lang = ocr_cfg.get("lang", "vi")
         self.use_angle_cls = ocr_cfg.get("use_angle_cls", True)
 
         self.yolo_model = self._init_yolo()
-        self.easyocr_reader = None
         self.paddleocr_engine = None
         self._init_ocr_engines()
 
@@ -343,15 +345,7 @@ class VisionAnalytics:
             return None
 
     def _init_ocr_engines(self):
-        """Initialize EasyOCR and PaddleOCR engines."""
-        try:
-            import easyocr
-            gpu = torch.cuda.is_available()
-            self.easyocr_reader = easyocr.Reader(['vi', 'en'], gpu=gpu)
-            logger.info(f"EasyOCR reader initialized (languages=['vi', 'en'], gpu={gpu}).")
-        except Exception as e:
-            logger.warning(f"EasyOCR initialization failed: {e}")
-
+        """Initialize PaddleOCR engine."""
         try:
             from paddleocr import PaddleOCR
             self.paddleocr_engine = PaddleOCR(use_angle_cls=False, lang=self.ocr_lang, show_log=False)
@@ -359,41 +353,28 @@ class VisionAnalytics:
         except Exception as e:
             logger.info(f"PaddleOCR engine unavailable: {e}")
 
-    def detect_objects(self, frame_path: str) -> List[str]:
-        """Perform object detection on a frame image using YOLOv9."""
+    def detect_objects_with_boxes(self, frame_path: str) -> List[Dict[str, Any]]:
+        """Perform object detection returning bounding boxes."""
         if self.yolo_model is None:
             return []
-
         try:
             results = self.yolo_model.predict(source=frame_path, conf=self.conf_threshold, verbose=False)
-            detected_classes = []
-            
+            detected = []
             for result in results:
                 if result.boxes is not None and len(result.boxes) > 0:
-                    for cls_id in result.boxes.cls.cpu().numpy():
-                        class_name = result.names[int(cls_id)]
-                        detected_classes.append(class_name)
-
-            unique_classes = list(set(detected_classes))
-            return unique_classes
+                    for box in result.boxes:
+                        cls_id = int(box.cls.cpu().numpy()[0])
+                        class_name = result.names[cls_id]
+                        xyxy = box.xyxy.cpu().numpy()[0].tolist()
+                        detected.append({"class": class_name, "box": xyxy})
+            return detected
         except Exception as e:
-            logger.error(f"YOLOv9 object detection error on '{frame_path}': {e}")
+            logger.error(f"YOLO detection error: {e}")
             return []
 
-    def extract_ocr_raw(self, frame_path: str) -> str:
-        """Extract raw OCR text from a frame image using EasyOCR or PaddleOCR."""
-        lines = []
-
-        if self.easyocr_reader is not None:
-            try:
-                results = self.easyocr_reader.readtext(frame_path, detail=0)
-                if results:
-                    lines = [str(t).strip() for t in results if str(t).strip()]
-                    if lines:
-                        return " ".join(lines)
-            except Exception as e:
-                logger.warning(f"EasyOCR extraction error on '{frame_path}': {e}")
-
+    def extract_ocr_with_boxes(self, frame_path: str) -> List[Dict[str, Any]]:
+        """Extract OCR text with bounding boxes using PaddleOCR."""
+        extracted = []
         if self.paddleocr_engine is not None:
             try:
                 result = self.paddleocr_engine.ocr(frame_path, cls=False)
@@ -402,22 +383,20 @@ class VisionAnalytics:
                         if not res_item:
                             continue
                         if isinstance(res_item, (list, tuple)) and len(res_item) >= 2:
+                            box = res_item[0]  # [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
                             text_info = res_item[1]
                             if isinstance(text_info, (list, tuple)) and len(text_info) >= 1:
                                 text_str = str(text_info[0]).strip()
                                 if text_str:
-                                    lines.append(text_str)
+                                    extracted.append({"text": text_str, "box": box})
                             elif isinstance(text_info, str) and text_info.strip():
-                                lines.append(text_info.strip())
-                    if lines:
-                        return " ".join(lines)
+                                extracted.append({"text": text_info.strip(), "box": box})
             except Exception as e:
-                logger.warning(f"PaddleOCR extraction error on '{frame_path}': {e}")
-
-        return " ".join(lines)
+                logger.warning(f"PaddleOCR extraction error: {e}")
+        return extracted
 
     def analyze_frame(self, frame_path: str) -> Dict[str, Any]:
-        """Extract object detection and OCR text features for a single keyframe."""
+        """Extract features with spatial intersection logic."""
         if not os.path.exists(frame_path):
             logger.error(f"Frame image file not found: {frame_path}")
             return {
@@ -427,15 +406,31 @@ class VisionAnalytics:
                 "ocr_fixed": ""
             }
 
-        objects = self.detect_objects(frame_path)
-        ocr_raw = self.extract_ocr_raw(frame_path)
-        ocr_fixed = ocr_raw
+        yolo_results = self.detect_objects_with_boxes(frame_path)
+        ocr_results = self.extract_ocr_with_boxes(frame_path)
+        
+        valid_ocr_texts = []
+        for ocr_item in ocr_results:
+            ocr_poly = ocr_item["box"]
+            ocr_text = ocr_item["text"]
+            
+            intersects = False
+            for y_item in yolo_results:
+                if boxes_intersect(ocr_poly, y_item["box"]):
+                    intersects = True
+                    break
+                    
+            if intersects or len(yolo_results) == 0:
+                valid_ocr_texts.append(ocr_text)
+
+        unique_classes = list(set([item["class"] for item in yolo_results]))
+        ocr_combined = " ".join(valid_ocr_texts)
 
         return {
             "frame_path": frame_path,
-            "objects": objects,
-            "ocr_raw": ocr_raw,
-            "ocr_fixed": ocr_fixed
+            "objects": unique_classes,
+            "ocr_raw": ocr_combined,
+            "ocr_fixed": ocr_combined
         }
 
 

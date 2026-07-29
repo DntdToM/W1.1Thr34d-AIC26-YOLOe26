@@ -64,6 +64,12 @@ class AudioASRProcessor:
         self.vad_model = None
         self.vad_utils = None
         self.asr_pipeline = None
+        self.clap_pipeline = None
+        self.clap_labels = [
+            "music", "human speaking", "animal sounds", 
+            "engine", "water", "wind", "explosion", 
+            "glass breaking", "siren", "gunshot", "footsteps", "cheering", "traffic"
+        ]
         self.ffmpeg_exe = self._find_ffmpeg_executable()
 
     def _find_ffmpeg_executable(self) -> str:
@@ -118,6 +124,40 @@ class AudioASRProcessor:
             except Exception as e:
                 logger.error(f"PhoWhisper initialization failed for '{self.phowhisper_model_name}': {e}")
                 raise e
+
+    def _init_clap(self):
+        """Initialize CLAP zero-shot audio classification pipeline."""
+        if self.clap_pipeline is None:
+            try:
+                from transformers import pipeline
+                device = 0 if torch.cuda.is_available() else -1
+                self.clap_pipeline = pipeline(
+                    task="zero-shot-audio-classification",
+                    model="laion/clap-htsat-unfused",
+                    device=device
+                )
+                logger.info("CLAP zero-shot model loaded successfully.")
+            except Exception as e:
+                logger.warning(f"CLAP initialization failed: {e}")
+                self.clap_pipeline = None
+
+    def get_uniform_chunks(self, audio_np: np.ndarray, chunk_sec: float = 5.0) -> List[Dict[str, int]]:
+        chunk_samples = int(chunk_sec * self.sample_rate)
+        total_samples = len(audio_np)
+        segments = []
+        for start_sample in range(0, total_samples, chunk_samples):
+            end_sample = min(start_sample + chunk_samples, total_samples)
+            if (end_sample - start_sample) < int(0.5 * self.sample_rate):
+                continue
+            start_ms = int((start_sample / self.sample_rate) * 1000)
+            end_ms = int((end_sample / self.sample_rate) * 1000)
+            segments.append({
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+                "start_sample": start_sample,
+                "end_sample": end_sample
+            })
+        return segments
 
     def extract_audio_ffmpeg(self, video_path: str, output_wav_path: str) -> bool:
         """Extract mono 16kHz WAV audio stream from video container via ffmpeg."""
@@ -192,41 +232,37 @@ class AudioASRProcessor:
         logger.info(f"Fallback chunking partitioned audio into {len(segments)} segments (5s interval).")
         return segments
 
-    def process_audio(self, video_path: str) -> Dict[str, str]:
-        """Extract audio stream, perform VAD segmentation, run ASR transcription, and return timestamp-text mappings."""
+    def process_audio(self, video_path: str) -> Dict[str, Any]:
+        """Extract audio stream, perform VAD segmentation, run ASR transcription, and CLAP classification."""
         if not os.path.exists(video_path):
             logger.error(f"Video file not found: {video_path}")
-            return {}
+            return {"asr_map": {}, "audio_event_map": {}}
 
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_wav:
             temp_wav_path = temp_wav.name
 
         timestamp_text_map = {}
+        timestamp_audio_event_map = {}
 
         try:
             has_audio = self.extract_audio_ffmpeg(video_path, temp_wav_path)
             if not has_audio or not os.path.exists(temp_wav_path) or os.path.getsize(temp_wav_path) <= 1000:
                 logger.info(f"Video file '{video_path}' contains no audio track or empty audio stream.")
-                return {}
+                return {"asr_map": {}, "audio_event_map": {}}
 
             audio_np = read_wav_file_fallback(temp_wav_path, target_sr=self.sample_rate)
             if len(audio_np) == 0:
-                return {}
-
-            speech_segments = self.get_speech_timestamps_vad(temp_wav_path, audio_np)
-            if not speech_segments:
-                logger.info(f"No speech segments detected in video: {video_path}")
-                return {}
+                return {"asr_map": {}, "audio_event_map": {}}
 
             self._init_phowhisper()
-
+            self._init_clap()
+            
+            # 1. PhoWhisper for speech segments (VAD)
+            speech_segments = self.get_speech_timestamps_vad(temp_wav_path, audio_np)
             for seg in speech_segments:
                 start_ms = seg["start_ms"]
                 end_ms = seg["end_ms"]
-                start_sample = seg["start_sample"]
-                end_sample = seg["end_sample"]
-
-                audio_chunk = audio_np[start_sample:end_sample]
+                audio_chunk = audio_np[seg["start_sample"]:seg["end_sample"]]
                 if len(audio_chunk) == 0:
                     continue
 
@@ -244,20 +280,44 @@ class AudioASRProcessor:
                 if text_content:
                     ts_key = f"{format_timestamp(start_ms)} - {format_timestamp(end_ms)}"
                     timestamp_text_map[ts_key] = text_content
+                    
+            # 2. CLAP for all audio (uniform chunking)
+            if self.clap_pipeline is not None:
+                uniform_chunks = self.get_uniform_chunks(audio_np, chunk_sec=5.0)
+                for seg in uniform_chunks:
+                    start_ms = seg["start_ms"]
+                    end_ms = seg["end_ms"]
+                    audio_chunk = audio_np[seg["start_sample"]:seg["end_sample"]]
+                    if len(audio_chunk) == 0:
+                        continue
+                    
+                    try:
+                        res = self.clap_pipeline(audio_chunk, candidate_labels=self.clap_labels)
+                        if res and len(res) > 0:
+                            top_label = res[0]['label']
+                            top_score = res[0]['score']
+                            if top_score > 0.3: # Confidence threshold
+                                ts_key = f"{format_timestamp(start_ms)} - {format_timestamp(end_ms)}"
+                                timestamp_audio_event_map[ts_key] = top_label
+                    except Exception as e:
+                        pass
 
-            logger.info(f"ASR transcription completed for {len(timestamp_text_map)} audio segments.")
-            return timestamp_text_map
+            logger.info(f"Audio processing completed: {len(timestamp_text_map)} speech segments, {len(timestamp_audio_event_map)} audio events.")
+            return {
+                "asr_map": timestamp_text_map,
+                "audio_event_map": timestamp_audio_event_map
+            }
 
         except Exception as e:
             logger.error(f"Audio ASR pipeline failed for video '{video_path}': {e}")
-            return {}
+            return {"asr_map": {}, "audio_event_map": {}}
 
         finally:
             if os.path.exists(temp_wav_path):
                 os.remove(temp_wav_path)
 
 
-def process_video_audio(video_path: str) -> Dict[str, str]:
+def process_video_audio(video_path: str) -> Dict[str, Any]:
     processor = AudioASRProcessor()
     return processor.process_audio(video_path)
 

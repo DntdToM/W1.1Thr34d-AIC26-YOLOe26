@@ -29,6 +29,25 @@ def calculate_sharpness_laplacian(gray_frame: np.ndarray) -> float:
         return 0.0
 
 
+def compute_histogram_similarity(img1: np.ndarray, img2: np.ndarray) -> float:
+    """Calculate Color Histogram (H-S) similarity using Correlation distance."""
+    if img1 is None or img2 is None:
+        return 0.0
+        
+    hsv1 = cv2.cvtColor(img1, cv2.COLOR_BGR2HSV)
+    hsv2 = cv2.cvtColor(img2, cv2.COLOR_BGR2HSV)
+    
+    # Calculate 2D histograms (Hue and Saturation)
+    hist1 = cv2.calcHist([hsv1], [0, 1], None, [50, 60], [0, 180, 0, 256])
+    hist2 = cv2.calcHist([hsv2], [0, 1], None, [50, 60], [0, 180, 0, 256])
+    
+    cv2.normalize(hist1, hist1, 0, 1, cv2.NORM_MINMAX)
+    cv2.normalize(hist2, hist2, 0, 1, cv2.NORM_MINMAX)
+    
+    score = cv2.compareHist(hist1, hist2, cv2.HISTCMP_CORREL)
+    return float(score)
+
+
 class VideoSegmenter:
     """Shot boundary detection via TransNetV2 and keyframe extraction via InfoShot algorithm."""
 
@@ -144,6 +163,7 @@ class VideoSegmenter:
         fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
 
         extracted_metadata = []
+        last_saved_frame = None
 
         for shot_idx, (start_idx, end_idx) in enumerate(shots, start=1):
             shot_len = end_idx - start_idx + 1
@@ -183,31 +203,49 @@ class VideoSegmenter:
             sharpest_frame = candidate_frames[sharpest_idx]
 
             shot_str = f"{shot_idx:04d}"
-            common_filename = f"{video_name}_shot_{shot_str}_common.jpg"
-            sharpest_filename = f"{video_name}_shot_{shot_str}_sharpest.jpg"
+            
+            # Stillness Pruning for common_frame
+            sim_common = 0.0
+            if last_saved_frame is not None:
+                sim_common = compute_histogram_similarity(last_saved_frame, common_frame)
+            
+            if last_saved_frame is None or sim_common < 0.98:
+                common_filename = f"{video_name}_shot_{shot_str}_common.jpg"
+                common_path = os.path.join(self.output_dir, common_filename)
+                cv2.imwrite(common_path, common_frame)
+                extracted_metadata.append({
+                    "video_name": video_name,
+                    "shot_id": shot_idx,
+                    "frame_type": "common",
+                    "frame_idx": mid_idx,
+                    "timestamp_ms": int((mid_idx / fps) * 1000),
+                    "saved_path": common_path
+                })
+                last_saved_frame = common_frame
+            else:
+                logger.info(f"Shot {shot_idx} common frame pruned (sim={sim_common:.4f})")
 
-            common_path = os.path.join(self.output_dir, common_filename)
-            sharpest_path = os.path.join(self.output_dir, sharpest_filename)
-
-            cv2.imwrite(common_path, common_frame)
-            cv2.imwrite(sharpest_path, sharpest_frame)
-
-            extracted_metadata.append({
-                "video_name": video_name,
-                "shot_id": shot_idx,
-                "frame_type": "common",
-                "frame_idx": mid_idx,
-                "timestamp_ms": int((mid_idx / fps) * 1000),
-                "saved_path": common_path
-            })
-            extracted_metadata.append({
-                "video_name": video_name,
-                "shot_id": shot_idx,
-                "frame_type": "sharpest",
-                "frame_idx": sharpest_idx,
-                "timestamp_ms": int((sharpest_idx / fps) * 1000),
-                "saved_path": sharpest_path
-            })
+            # Stillness Pruning for sharpest_frame (only if it's not the same frame idx)
+            if sharpest_idx != mid_idx:
+                sim_sharpest = 0.0
+                if last_saved_frame is not None:
+                    sim_sharpest = compute_histogram_similarity(last_saved_frame, sharpest_frame)
+                
+                if last_saved_frame is None or sim_sharpest < 0.98:
+                    sharpest_filename = f"{video_name}_shot_{shot_str}_sharpest.jpg"
+                    sharpest_path = os.path.join(self.output_dir, sharpest_filename)
+                    cv2.imwrite(sharpest_path, sharpest_frame)
+                    extracted_metadata.append({
+                        "video_name": video_name,
+                        "shot_id": shot_idx,
+                        "frame_type": "sharpest",
+                        "frame_idx": sharpest_idx,
+                        "timestamp_ms": int((sharpest_idx / fps) * 1000),
+                        "saved_path": sharpest_path
+                    })
+                    last_saved_frame = sharpest_frame
+                else:
+                    logger.info(f"Shot {shot_idx} sharpest frame pruned (sim={sim_sharpest:.4f})")
 
         cap.release()
         return extracted_metadata

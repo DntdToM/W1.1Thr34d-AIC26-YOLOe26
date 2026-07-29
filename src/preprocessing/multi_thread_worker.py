@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from src.preprocessing.video_segment import VideoSegmenter
 from src.preprocessing.audio_asr import AudioASRProcessor
-from src.preprocessing.vision_ocr_obj import VisionAnalytics, window_based_summarize, COCO_VI_MAP
+from src.preprocessing.vision_ocr_obj import VisionAnalytics, window_based_summarize
 from src.preprocessing.embedding_gen import EmbeddingGenerator
 from src.database.metadata_db import MetadataDB
 
@@ -136,9 +136,11 @@ class MultiThreadPipelineWorker:
 
         try:
             keyframes_meta = self.segmenter.process_video(video_path)
-            asr_map = self.audio_processor.process_audio(video_path)
+            audio_results = self.audio_processor.process_audio(video_path)
+            asr_map = audio_results.get("asr_map", {})
+            audio_event_map = audio_results.get("audio_event_map", {})
 
-            logger.info(f"[{video_name}] Extracted {len(keyframes_meta)} keyframes and {len(asr_map)} ASR segments.")
+            logger.info(f"[{video_name}] Extracted {len(keyframes_meta)} keyframes, {len(asr_map)} ASR segments, and {len(audio_event_map)} audio events.")
 
             if not keyframes_meta:
                 logger.warning(f"[{video_name}] Keyframe extraction yielded 0 frames.")
@@ -152,6 +154,7 @@ class MultiThreadPipelineWorker:
             raw_keyframes_meta = []
             image_paths = []
             parsed_asr_list = preparse_asr_map(asr_map)
+            parsed_event_list = preparse_asr_map(audio_event_map)
 
             for meta in keyframes_meta:
                 img_path = meta["saved_path"]
@@ -161,11 +164,13 @@ class MultiThreadPipelineWorker:
                 
                 frame_ts = meta.get("timestamp_ms", 0)
                 matched_asr = match_asr_for_timestamp(frame_ts, parsed_asr_list, tolerance_ms=3000)
+                matched_event = match_asr_for_timestamp(frame_ts, parsed_event_list, tolerance_ms=3000)
 
                 meta["objects"] = vision_res.get("objects", [])
                 meta["ocr_raw"] = vision_res.get("ocr_raw", "")
                 meta["ocr_fixed"] = vision_res.get("ocr_fixed", "")
                 meta["asr_text"] = matched_asr
+                meta["audio_event"] = matched_event
 
                 raw_keyframes_meta.append(meta)
 
@@ -174,24 +179,43 @@ class MultiThreadPipelineWorker:
 
             texts_for_embedding = []
             for meta in enriched_keyframes:
-                objs_vi = [COCO_VI_MAP.get(o, o) for o in meta.get("objects", [])]
-                obj_str = f"Vật thể: {', '.join(objs_vi)}. " if objs_vi else ""
-                ocr_str = f"Chữ màn hình: {meta.get('ocr_fixed', '')}. " if meta.get("ocr_fixed") else ""
-                asr_str = f"Lời nói: {meta.get('asr_text', '')}. " if meta.get("asr_text") else ""
-                ctx_str = f"Bối cảnh: {meta.get('context_summary', '')}" if meta.get("context_summary") else ""
+                objs_raw = meta.get("objects", [])
+                obj_str = ', '.join(objs_raw) if objs_raw else 'Không có'
+                ocr_str = meta.get('ocr_fixed', '').strip() or 'Không có'
+                
+                audio_str_parts = []
+                if meta.get("asr_text"):
+                    audio_str_parts.append(meta.get("asr_text"))
+                if meta.get("audio_event"):
+                    audio_str_parts.append(meta.get("audio_event"))
+                audio_str = ' | '.join(audio_str_parts) if audio_str_parts else 'Không có'
+                
+                ctx_str = meta.get('context_summary', '').strip() or 'Không có'
 
-                combined_text = f"{obj_str}{ocr_str}{asr_str}{ctx_str}".strip()
-                texts_for_embedding.append(combined_text if combined_text else "Video keyframe")
+                combined_text = f"Ngữ cảnh: {ctx_str}. Chi tiết: Vật thể: {obj_str}. Chữ: {ocr_str}. Âm thanh: {audio_str}."
+                texts_for_embedding.append(combined_text)
 
             logger.info(f"[{video_name}] Generating visual and text embeddings...")
             image_embeddings = self.emb_generator.get_image_embeddings_batch(image_paths)
-            text_embeddings = self.emb_generator.get_text_embeddings_batch(texts_for_embedding)
+            text_emb_result = self.emb_generator.get_text_embeddings_batch(texts_for_embedding)
+            
+            if isinstance(text_emb_result, dict):
+                text_dense = text_emb_result["dense"]
+                text_sparse = text_emb_result["sparse"]
+            else:
+                text_dense = text_emb_result
+                import scipy.sparse as sp
+                text_sparse = sp.csr_matrix((len(texts_for_embedding), 250002), dtype=np.float32)
 
             img_emb_path = os.path.join(self.embeddings_dir, f"{video_name}_img_emb.npy")
             text_emb_path = os.path.join(self.embeddings_dir, f"{video_name}_text_emb.npy")
+            text_sparse_path = os.path.join(self.embeddings_dir, f"{video_name}_text_sparse.npz")
 
             np.save(img_emb_path, image_embeddings)
-            np.save(text_emb_path, text_embeddings)
+            np.save(text_emb_path, text_dense)
+            
+            import scipy.sparse as sp
+            sp.save_npz(text_sparse_path, text_sparse)
 
             json_metadata_path = os.path.join(self.metadata_dir, f"{video_name}_metadata.json")
             full_metadata = {
@@ -199,8 +223,10 @@ class MultiThreadPipelineWorker:
                 "video_path": video_path,
                 "total_keyframes": len(enriched_keyframes),
                 "asr_map": asr_map,
+                "audio_event_map": audio_event_map,
                 "img_embeddings_file": img_emb_path,
                 "text_embeddings_file": text_emb_path,
+                "text_sparse_file": text_sparse_path,
                 "keyframes": enriched_keyframes
             }
 
@@ -221,7 +247,7 @@ class MultiThreadPipelineWorker:
                             "timestamp_ms": item.get("timestamp_ms", 0),
                             "frame_path": item.get("saved_path", ""),
                             "ocr_text": item.get("ocr_fixed", ""),
-                            "asr_text": item.get("asr_text", ""),
+                            "asr_text": f"{item.get('asr_text', '')} | {item.get('audio_event', '')}".strip(" |"),
                             "detected_objects": ", ".join(item.get("objects", [])),
                             "context_summary": item.get("context_summary", "")
                         })

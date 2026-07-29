@@ -1,15 +1,15 @@
-# 🎬 AIC 2026 - Multimodal Video Retrieval System (Phase 1 Offline Indexing)
+# AIC 2026 - Multimodal Video Retrieval System (Phase 1 Offline Indexing)
 
-> **Hệ thống Trích xuất Đặc trưng & Đánh chỉ mục Video Đa phương tiện Tốc độ cao**  
+> **Hệ thống Trích xuất Đặc trưng & Đánh chỉ mục Video Đa phương tiện Tốc độ cao**
 > Dự án được tối ưu hóa cho cuộc thi **Ho Chi Minh City AI Challenge (AIC 2026)**, sử dụng mô hình thị giác mở, nhận diện đối tượng, đọc chữ OCR, bóc tách âm thanh ASR và tổng hợp ngữ cảnh LLM theo cửa sổ thời gian.
 
 ---
 
-## 📌 1. Tổng quan Kiến trúc Hệ thống (System Overview)
+## 1. Tổng quan Kiến trúc Hệ thống (System Overview)
 
 Hệ thống được thiết kế theo mô hình **Pipeline Khép kín (Offline Indexing - Phase 1)** với khả năng quản lý tài nguyên GPU/RAM theo chuẩn **Singleton Pattern**, loại bỏ hoàn toàn các lỗi xung đột CUDA/C++, tràn bộ nhớ VRAM và giới hạn Rate-Limit API.
 
-```
+```text
                                   +-----------------------+
                                   |   Raw Input Videos    |
                                   +-----------+-----------+
@@ -64,9 +64,9 @@ Hệ thống được thiết kế theo mô hình **Pipeline Khép kín (Offline
 
 ---
 
-## 🛠️ 2. Danh mục Công nghệ & Mô hình (Tech Stack & Models)
+## 2. Danh mục Công nghệ & Mô hình (Tech Stack & Models)
 
-### 👁️ **Thị giác & Nhận diện (Computer Vision)**
+### Thị giác & Nhận diện (Computer Vision)
 * **TransNetV2 (PyTorch CUDA):** Phát hiện ngưỡng cắt cảnh (Shot Boundaries) chính xác mức từng khung hình.
 * **InfoShot (Histogram & Laplacian Entropy):** Trích xuất kép 2 Keyframes cho mỗi Shot:
   * `common`: Khung hình cắt cảnh chuẩn cho visual embedding.
@@ -74,22 +74,22 @@ Hệ thống được thiết kế theo mô hình **Pipeline Khép kín (Offline
 * **SigLIP 2 (`google/siglip-base-patch16-224`):** Mô hình thị giác mở (Open-Vocabulary Zero-Shot Vision-Language) trích xuất Vector Embedding 768D.
 * **YOLOv9-small (`yolov9c.pt`):** Nhận diện đối tượng phổ biến (80 lớp COCO) với từ điển ánh xạ tự động sang Tiếng Việt.
 
-### 📜 **Đọc chữ & Âm thanh (OCR & ASR)**
+### Đọc chữ & Âm thanh (OCR & ASR)
 * **EasyOCR & PaddleOCR (GPU Accelerated):** Trích xuất văn bản tiếng Việt/tiếng Anh trên khung hình video.
 * **Silero VAD & PhoWhisper / Whisper-small:** Bóc tách tiếng nói, lọc khoảng lặng và chuyển thể lời thoại ASR chính xác theo mốc thời gian (timestamps).
 
-### 🧠 **Trí tuệ nhân tạo Ngôn ngữ (LLM & Embeddings)**
+### Trí tuệ nhân tạo Ngôn ngữ (LLM & Embeddings)
 * **Groq API (Llama 3.1 8B Instant):** Xoay vòng đa khóa (Multi-Key Rotation) với tốc độ > 800 tokens/sec.
 * **Google Gemini Flash API (`gemini-flash-latest`):** Fallback tự động khi Groq kịch hạn mức 429.
 * **BGE-M3 (`BAAI/bge-m3`):** Trích xuất Dense Text Embedding (1024D) đa ngữ chuẩn hóa L2 Cosine Similarity.
 
-### 💾 **Lưu trữ & Đánh chỉ mục (Indexing & Storage)**
+### Lưu trữ & Đánh chỉ mục (Indexing & Storage)
 * **FAISS (`IndexFlatIP`):** Đánh chỉ mục Vector không gian 768D tìm kiếm cực nhanh trên GPU/CPU.
 * **SQLite (`metadata.db`) & JSON Metadata:** Quản lý siêu dữ liệu có cấu trúc.
 
 ---
 
-## 🔄 3. Quy trình Xử lý Toàn diện (End-to-End Workflow)
+## 3. Quy trình Xử lý Toàn diện (End-to-End Workflow)
 
 1. **Phân đoạn Video (Shot Segmentation):**  
    Video đầu vào được phân tích qua TransNetV2 để tách thành các Shots. InfoShot chọn ra 2 frames (`common` & `sharpest`) cho mỗi phân cảnh.
@@ -105,10 +105,10 @@ Hệ thống được thiết kế theo mô hình **Pipeline Khép kín (Offline
 
 ---
 
-## ⚡ 4. Hướng dẫn Khởi chạy trên Kaggle GPU
+## 4. Hướng dẫn Khởi chạy trên Kaggle GPU
 
 ### 1. Chuẩn bị API Keys & Kaggle Secrets
-Nạp các Secret sau vào Kaggle Notebook (**Add-ons** ➔ **Secrets**):
+Nạp các Secret sau vào Kaggle Notebook (**Add-ons** -> **Secrets**):
 * `GROQ_API_KEY`: Chuỗi các Groq Key phân cách bởi dấu phẩy (`gsk_key1,gsk_key2,gsk_key3,gsk_key4`).
 * `GEMINI_API_KEY`: Gemini Flash API Key.
 * `GITHUB_TOKEN`: Personal Access Token (PAT) nếu Repo để ở chế độ Private.
@@ -134,7 +134,7 @@ Nạp các Secret sau vào Kaggle Notebook (**Add-ons** ➔ **Secrets**):
 
 ---
 
-## 📁 5. Cấu trúc Thư mục Kết quả (Output Structure)
+## 5. Cấu trúc Thư mục Kết quả (Output Structure)
 
 ```text
 processed_data/
@@ -150,6 +150,6 @@ processed_data/
 
 ---
 
-## 🛡️ 6. Giấy phép & Đóng góp (License)
+## 6. Giấy phép & Đóng góp (License)
 
 Dự án thuộc bản quyền đội ngũ phát triển **W1.1Thr34d**. Nghiêm cấm sao chép hoặc thương mại hóa khi chưa có sự đồng ý.

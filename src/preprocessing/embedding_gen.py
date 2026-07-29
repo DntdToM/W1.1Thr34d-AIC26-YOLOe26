@@ -64,11 +64,21 @@ class EmbeddingGenerator:
                 raise e
 
     def _init_text_model(self):
-        """Initialize BAAI/bge-m3 text embedding model."""
+        """Initialize BAAI/bge-m3 text embedding model for Dense and Sparse."""
         if self.text_model is None:
             try:
+                from FlagEmbedding import BGEM3FlagModel
+                logger.info(f"Loading BGEM3FlagModel from '{self.text_model_name}'...")
+                self.text_model = BGEM3FlagModel(
+                    self.text_model_name,
+                    use_fp16=self.use_fp16 and torch.cuda.is_available()
+                )
+                self.use_flag_embedding = True
+                logger.info("BGEM3FlagModel loaded successfully (Dense + Sparse).")
+            except Exception as e:
+                logger.warning(f"FlagEmbedding not available ({e}). Falling back to SentenceTransformer (Dense only).")
+                self.use_flag_embedding = False
                 from sentence_transformers import SentenceTransformer
-                logger.info(f"Loading BGE-M3 text model from '{self.text_model_name}'...")
                 model_kwargs = {"torch_dtype": self.torch_dtype} if torch.cuda.is_available() else {}
                 self.text_model = SentenceTransformer(
                     self.text_model_name,
@@ -76,15 +86,6 @@ class EmbeddingGenerator:
                     model_kwargs=model_kwargs
                 )
                 logger.info("BGE-M3 model loaded successfully via SentenceTransformer.")
-            except Exception:
-                logger.info("Falling back to HuggingFace AutoModel for BGE-M3...")
-                from transformers import AutoTokenizer, AutoModel
-                self.text_tokenizer = AutoTokenizer.from_pretrained(self.text_model_name)
-                self.text_model = AutoModel.from_pretrained(
-                    self.text_model_name,
-                    torch_dtype=self.torch_dtype
-                ).to(self.device)
-                self.text_model.eval()
 
     def get_image_embeddings_batch(self, images: List[Union[str, Image.Image]], batch_size: int = 64) -> np.ndarray:
         """Extract L2-normalized image embeddings batch [N, 768] using SigLIP 2."""
@@ -155,15 +156,39 @@ class EmbeddingGenerator:
         batch_res = self.get_image_embeddings_batch([image])
         return batch_res[0] if len(batch_res) > 0 else np.zeros((768,), dtype=np.float32)
 
-    def get_text_embeddings_batch(self, texts: List[str]) -> np.ndarray:
-        """Extract L2-normalized dense text embeddings batch [N, 1024] using BGE-M3."""
+    def get_text_embeddings_batch(self, texts: List[str]) -> Dict[str, Any]:
+        """Extract Dense [N, 1024] and Sparse text embeddings using BGE-M3."""
         if not texts:
-            return np.empty((0, 1024), dtype=np.float32)
+            import scipy.sparse as sp
+            return {"dense": np.empty((0, 1024), dtype=np.float32), "sparse": sp.csr_matrix((0, 250002), dtype=np.float32)}
 
         self._init_text_model()
 
         try:
-            if hasattr(self.text_model, "encode"):
+            if getattr(self, "use_flag_embedding", False):
+                out = self.text_model.encode(
+                    texts,
+                    batch_size=32,
+                    return_dense=True,
+                    return_sparse=True,
+                    return_colbert_vecs=False
+                )
+                dense_vecs = out['dense_vecs']
+                lexical_weights = out['lexical_weights'] # List of Dict[str, float]
+                
+                import scipy.sparse as sp
+                rows, cols, data = [], [], []
+                vocab_size = 250002 # Standard BGE-M3 XLM-R vocab size
+                for r_idx, lex_dict in enumerate(lexical_weights):
+                    for k, v in lex_dict.items():
+                        rows.append(r_idx)
+                        cols.append(int(k))
+                        data.append(float(v))
+                sparse_matrix = sp.csr_matrix((data, (rows, cols)), shape=(len(texts), vocab_size), dtype=np.float32)
+                
+                return {"dense": dense_vecs, "sparse": sparse_matrix}
+            else:
+                # Fallback to SentenceTransformer
                 embeddings = self.text_model.encode(
                     texts,
                     batch_size=32,
@@ -171,26 +196,12 @@ class EmbeddingGenerator:
                     normalize_embeddings=True
                 )
                 res_array = np.array(embeddings, dtype=np.float32)
-            else:
-                inputs = self.text_tokenizer(
-                    texts,
-                    padding=True,
-                    truncation=True,
-                    max_length=512,
-                    return_tensors="pt"
-                ).to(self.device)
                 
-                with torch.no_grad():
-                    out = self.text_model(**inputs)
-                    token_embeddings = out[0]
-                    attention_mask = inputs["attention_mask"].unsqueeze(-1).expand(token_embeddings.size()).float()
-                    sum_embeddings = torch.sum(token_embeddings * attention_mask, 1)
-                    sum_mask = torch.clamp(attention_mask.sum(1), min=1e-9)
-                    pooled = sum_embeddings / sum_mask
-                    pooled = pooled / pooled.norm(dim=-1, keepdim=True)
-                    
-                res_array = pooled.float().cpu().numpy().astype(np.float32)
-            return res_array
+                import scipy.sparse as sp
+                sparse_matrix = sp.csr_matrix((len(texts), 250002), dtype=np.float32)
+                
+                return {"dense": res_array, "sparse": sparse_matrix}
+                
         except Exception as e:
             logger.error(f"Text batch embedding extraction error: {e}")
             raise e
@@ -198,10 +209,14 @@ class EmbeddingGenerator:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-    def get_text_embedding(self, text: str) -> np.ndarray:
-        """Extract a single text vector embedding [1024,]."""
+    def get_text_embedding(self, text: str) -> Dict[str, Any]:
+        """Extract a single text vector embedding (Dense + Sparse)."""
         batch_res = self.get_text_embeddings_batch([text])
-        return batch_res[0] if len(batch_res) > 0 else np.zeros((1024,), dtype=np.float32)
+        if batch_res["dense"].shape[0] > 0:
+            return {"dense": batch_res["dense"][0], "sparse": batch_res["sparse"][0]}
+        else:
+            import scipy.sparse as sp
+            return {"dense": np.zeros((1024,), dtype=np.float32), "sparse": sp.csr_matrix((1, 250002), dtype=np.float32)[0]}
 
 
 if __name__ == "__main__":

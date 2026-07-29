@@ -1,0 +1,256 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "updated_at": "2026-07-27"
+  },
+  "entities": {
+    "person": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["người", "con người", "nhân vật"],
+        "en": ["person", "people", "human"]
+      },
+      "controlled_variants": {
+        "vi": ["đàn ông", "phụ nữ", "con trai", "con gái", "nam", "nữ", "cậu bé", "cô bé", "nam giới", "nữ giới"],
+        "en": ["man", "woman", "boy", "girl", "male", "female"]
+      }
+    },
+    "car": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["ô tô", "xe hơi", "xe bốn bánh"],
+        "en": ["car", "automobile"]
+      },
+      "controlled_variants": {
+        "vi": ["xe con", "xe 4 chỗ", "sedan"],
+        "en": ["sedan", "hatchback"]
+      }
+    },
+    "suv": {
+      "enabled": true,
+      "source": ["YOLOE", "manual"],
+      "aliases": {
+        "vi": ["xe thể thao đa dụng", "xe gầm cao"],
+        "en": ["suv"]
+      }
+    },
+    "bicycle": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["xe đạp", "xe đạp thể thao"],
+        "en": ["bicycle", "bike"]
+      }
+    },
+    "motorcycle": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["xe máy", "xe mô tô", "mô tô", "xe gắn máy"],
+        "en": ["motorcycle", "motorbike", "moto"]
+      }
+    },
+    "airplane": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["máy bay", "phi cơ", "máy bay hành khách"],
+        "en": ["airplane", "aeroplane", "plane"]
+      }
+    },
+    "drone": {
+      "enabled": true,
+      "source": ["manual"],
+      "aliases": {
+        "vi": ["máy bay không người lái", "flycam", "drone"],
+        "en": ["drone", "uav"]
+      }
+    },
+    "bus": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["xe buýt", "xe khách"],
+        "en": ["bus", "coach"]
+      }
+    },
+    "train": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["tàu hỏa", "tàu lửa", "xe lửa"],
+        "en": ["train"]
+      }
+    },
+    "truck": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["xe tải", "xe chở hàng"],
+        "en": ["truck", "lorry"]
+      }
+    },
+    "boat": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["thuyền", "tàu thủy", "xuồng"],
+        "en": ["boat", "ship"]
+      }
+    },
+    "traffic light": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["đèn giao thông", "đèn tín hiệu giao thông", "đèn xanh đèn đỏ", "đèn đỏ"],
+        "en": ["traffic light", "stoplight"]
+      }
+    },
+    "fire hydrant": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["vòi chữa cháy", "trụ cứu hỏa", "trụ nước chữa cháy"],
+        "en": ["fire hydrant"]
+      }
+    },
+    "stop sign": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["biển dừng", "biển báo dừng"],
+        "en": ["stop sign"]
+      }
+    },
+    "bird": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["chim", "con chim"],
+        "en": ["bird"]
+      }
+    },
+    "cat": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["mèo", "con mèo"],
+        "en": ["cat"]
+      }
+    },
+    "dog": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["chó", "con chó"],
+        "en": ["dog", "puppy"]
+      }
+    },
+    "horse": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["ngựa", "con ngựa"],
+        "en": ["horse"]
+      }
+    },
+    "backpack": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["ba lô", "balo", "cặp táp"],
+        "en": ["backpack"]
+      }
+    },
+    "umbrella": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["ô", "dù", "ô dù", "chiếc ô"],
+        "en": ["umbrella"]
+      }
+    },
+    "handbag": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["túi xách", "giỏ xách"],
+        "en": ["handbag", "purse"]
+      }
+    },
+    "tie": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["cà vạt", "caravat"],
+        "en": ["tie", "necktie"]
+      }
+    },
+    "suitcase": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["va li", "vali", "hành lý"],
+        "en": ["suitcase", "luggage"]
+      }
+    },
+    "bottle": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["chai nước", "cái chai", "chai nhựa", "chai thủy tinh"],
+        "en": ["bottle", "water bottle"]
+      }
+    },
+    "cup": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["cốc", "cái cốc", "ly", "cái ly", "tách"],
+        "en": ["cup"]
+      }
+    },
+    "chair": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["ghế", "cái ghế", "ghế ngồi"],
+        "en": ["chair"]
+      }
+    },
+    "couch": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["ghế sofa", "sô pha", "ghế bành"],
+        "en": ["couch", "sofa"]
+      }
+    },
+    "tv": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["tivi", "màn hình tivi", "vô tuyến", "truyền hình"],
+        "en": ["tv", "television"]
+      }
+    },
+    "laptop": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["máy tính xách tay", "laptop", "máy tính cá nhân"],
+        "en": ["laptop"]
+      }
+    },
+    "cell phone": {
+      "enabled": true,
+      "source": ["COCO", "YOLOE"],
+      "aliases": {
+        "vi": ["điện thoại", "điện thoại di động", "smartphone", "điện thoại thông minh"],
+        "en": ["cell phone", "mobile phone", "smartphone"]
+      }
+    }
+  }
+}
