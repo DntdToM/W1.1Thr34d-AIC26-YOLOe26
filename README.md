@@ -1,13 +1,13 @@
-# AIC 2026 - Multimodal Video Retrieval System (Phase 1 Offline Indexing)
+# AIC 2026 - Multimodal Video Retrieval System (SOTA Hybrid Architecture)
 
-> **Hệ thống Trích xuất Đặc trưng & Đánh chỉ mục Video Đa phương tiện Tốc độ cao**
-> Dự án được tối ưu hóa cho cuộc thi **Ho Chi Minh City AI Challenge (AIC 2026)**, sử dụng mô hình thị giác mở, nhận diện đối tượng, đọc chữ OCR, bóc tách âm thanh ASR và tổng hợp ngữ cảnh LLM theo cửa sổ thời gian.
+> **Hệ thống Trích xuất Đặc trưng & Đánh chỉ mục Video Đa phương tiện Khép kín**
+> Dự án được tối ưu hóa cho cuộc thi **Ho Chi Minh City AI Challenge (AIC 2026)**, sử dụng kiến trúc lai (Hybrid Architecture) kết hợp Dense Semantic Vector và Sparse Lexical Matrix, tích hợp Canonical Lexicon Layer chống nhiễu từ vựng tiếng Việt.
 
 ---
 
 ## 1. Tổng quan Kiến trúc Hệ thống (System Overview)
 
-Hệ thống được thiết kế theo mô hình **Pipeline Khép kín (Offline Indexing - Phase 1)** với khả năng quản lý tài nguyên GPU/RAM theo chuẩn **Singleton Pattern**, loại bỏ hoàn toàn các lỗi xung đột CUDA/C++, tràn bộ nhớ VRAM và giới hạn Rate-Limit API.
+Hệ thống được thiết kế theo mô hình **Split Architecture** tách bạch hoàn toàn quy trình lập chỉ mục ngoại tuyến (Offline Indexing) và truy xuất trực tuyến (Online Retrieval). Loại bỏ ảo tưởng tối ưu hóa, kiến trúc này tập trung vào sự tinh gọn, ổn định của C++ (FAISS) và sức mạnh xử lý ma trận của PyTorch (SpMM).
 
 ```text
                                   +-----------------------+
@@ -17,34 +17,35 @@ Hệ thống được thiết kế theo mô hình **Pipeline Khép kín (Offline
                                               v
                               +---------------+---------------+
                               |  Video & Audio Preprocessing  |
+                              |  (TransNetV2 + InfoShot)      |
+                              +---------------+---------------+
+                                              |
+                                              v
+                              +---------------+---------------+
+                              | HSV 2D Hist Stillness Pruning |
+                              | (Loại bỏ khung hình tĩnh)     |
                               +---------------+---------------+
                                               |
                      +------------------------+------------------------+
                      |                                                 |
                      v                                                 v
         +------------+------------+                       +------------+------------+
-        | TransNetV2 + InfoShot   |                       |    Silero VAD + Whisper   |
-        | Keyframe Extraction     |                       |    Speech-to-Text (ASR)   |
+        | YOLOE-26 + PaddleOCR    |                       |   Silero VAD Routing    |
+        | Object & Text Detection |                       | PhoWhisper(ASR) / CLAP  |
         +------------+------------+                       +------------+------------+
                      |                                                 |
                      v                                                 v
         +------------+------------+                       +------------+------------+
-        | YOLOv9 + EasyOCR/Paddle |                       |  Timestamp Alignment Map |
-        | Objects & Text OCR      |                       +------------+------------+
-        +------------+------------+                                    |
+        | Spatial Intersection    |                       |     Audio Aggregation   |
+        | Denoise OCR by BBoxes   |                       |  (Lời thoại & Tiếng động)|
+        +------------+------------+                       +------------+------------+
                      |                                                 |
                      +------------------------+------------------------+
                                               |
                                               v
                               +---------------+---------------+
                               |    Window-Based Summarize     |
-                              |   (30s-90s Window Batching)   |
-                              +---------------+---------------+
-                                              |
-                                              v
-                              +---------------+---------------+
-                              |   Groq Multi-Keys Rotation    |
-                              |  (Llama 3.1 8B) / Gemini API  |
+                              | (Groq API Llama 3.1 8B 30s)   |
                               +---------------+---------------+
                                               |
                                               v
@@ -57,8 +58,8 @@ Hệ thống được thiết kế theo mô hình **Pipeline Khép kín (Offline
                      |                                                 |
                      v                                                 v
         +------------+------------+                       +------------+------------+
-        |    FAISS Vector Index   |                       | SQLite Structured DB &    |
-        |    (indexFlatIP 768D)   |                       | JSON Frame Metadata       |
+        |  FAISS Dual Dense Index |                       |  SpMM Sparse Matrix &   |
+        | (Vision 768D / Text 1024D|                      |  Canonical Lexicon JSON |
         +-------------------------+                       +-------------------------+
 ```
 
@@ -67,41 +68,43 @@ Hệ thống được thiết kế theo mô hình **Pipeline Khép kín (Offline
 ## 2. Danh mục Công nghệ & Mô hình (Tech Stack & Models)
 
 ### Thị giác & Nhận diện (Computer Vision)
-* **TransNetV2 (PyTorch CUDA):** Phát hiện ngưỡng cắt cảnh (Shot Boundaries) chính xác mức từng khung hình.
-* **InfoShot (Histogram & Laplacian Entropy):** Trích xuất kép 2 Keyframes cho mỗi Shot:
-  * `common`: Khung hình cắt cảnh chuẩn cho visual embedding.
-  * `sharpest`: Khung hình nét nhất phục vụ đọc chữ OCR.
-* **SigLIP 2 (`google/siglip-base-patch16-224`):** Mô hình thị giác mở (Open-Vocabulary Zero-Shot Vision-Language) trích xuất Vector Embedding 768D.
-* **YOLOv9-small (`yolov9c.pt`):** Nhận diện đối tượng phổ biến (80 lớp COCO) với từ điển ánh xạ tự động sang Tiếng Việt.
+* **TransNetV2 & InfoShot:** Phân đoạn Shot và chọn 2 frames (`common` và `sharpest`) theo Laplacian Entropy.
+* **HSV 2D Histogram Pruning:** Loại bỏ cực nhanh các frame tĩnh (stillness pruning) cắt giảm 50% gánh nặng embedding.
+* **SigLIP 2 (`google/siglip-base-patch16-224`):** Trích xuất Vector Hình ảnh L2-Normalized (768D).
+* **YOLOE-26 (`confidence 0.05`, có NMS):** Nhận diện đối tượng thô Open-Vocabulary.
+* **PaddleOCR:** Trích xuất văn bản trên khung hình (được lọc thông qua Spatial Intersection với YOLO BBoxes).
 
-### Đọc chữ & Âm thanh (OCR & ASR)
-* **EasyOCR & PaddleOCR (GPU Accelerated):** Trích xuất văn bản tiếng Việt/tiếng Anh trên khung hình video.
-* **Silero VAD & PhoWhisper / Whisper-small:** Bóc tách tiếng nói, lọc khoảng lặng và chuyển thể lời thoại ASR chính xác theo mốc thời gian (timestamps).
+### Âm thanh (Audio & Speech)
+* **Silero VAD Router:** Phân luồng âm thanh tự động.
+* **PhoWhisper (ASR):** Bóc tách lời thoại tiếng Việt nếu có tiếng người.
+* **CLAP:** Nhận diện âm thanh môi trường (tiếng mưa, tiếng động cơ) nếu không có tiếng người.
 
-### Trí tuệ nhân tạo Ngôn ngữ (LLM & Embeddings)
-* **Groq API (Llama 3.1 8B Instant):** Xoay vòng đa khóa (Multi-Key Rotation) với tốc độ > 800 tokens/sec.
-* **Google Gemini Flash API (`gemini-flash-latest`):** Fallback tự động khi Groq kịch hạn mức 429.
-* **BGE-M3 (`BAAI/bge-m3`):** Trích xuất Dense Text Embedding (1024D) đa ngữ chuẩn hóa L2 Cosine Similarity.
+### Ngôn ngữ & Embedding (NLP)
+* **Groq API (Llama 3.1 8B Instant):** Sinh mô tả tuyến tính (Semantic Summary) cho các cửa sổ thời gian.
+* **BGE-M3 (`BAAI/bge-m3`):** Sinh Dual Embeddings (Dense Vector 1024D + Sparse Lexical Weights 250002D) hỗ trợ Hybrid Retrieval.
+* **Canonical Lexicon Parser:** Bộ máy chuẩn hóa khái niệm Tiếng Việt O(1), triệt tiêu lỗi Word Boundary bằng kỹ thuật string padding.
 
-### Lưu trữ & Đánh chỉ mục (Indexing & Storage)
-* **FAISS (`IndexFlatIP`):** Đánh chỉ mục Vector không gian 768D tìm kiếm cực nhanh trên GPU/CPU.
-* **SQLite (`metadata.db`) & JSON Metadata:** Quản lý siêu dữ liệu có cấu trúc.
+### Chỉ mục & Truy xuất (Indexing & Retrieval)
+* **FAISS (GPU IndexFlatIP / IVFFlat):** Xử lý Dense Vectors trên GPU.
+* **PyTorch Sparse Matrix Multiplication (SpMM):** Tính Lexical Score trực tiếp trên GPU thay vì CPU BM25.
+* **Hybrid Late Fusion:** $S_{final} = 0.5 \cdot S_{vision} + 0.3 \cdot S_{semantic} + 0.2 \cdot S_{lexical}$.
+* **Temporal Reranking:** Thuật toán trượt cửa sổ 3-giây để cộng điểm (proximity bonus) cho các shot kề nhau.
 
 ---
 
-## 3. Quy trình Xử lý Toàn diện (End-to-End Workflow)
+## 3. Quy trình Triển khai (Phases Breakdown)
 
-1. **Phân đoạn Video (Shot Segmentation):**  
-   Video đầu vào được phân tích qua TransNetV2 để tách thành các Shots. InfoShot chọn ra 2 frames (`common` & `sharpest`) cho mỗi phân cảnh.
-2. **Trích xuất Đặc trưng Thô (Raw Analytics):**  
-   YOLOv9 quét vật thể, EasyOCR đọc chữ màn hình, Silero VAD + Whisper bóc tách lời thoại ASR.
-3. **Gom cụm Cửa sổ & Tổng hợp Ngữ cảnh LLM (Window-Based Summarization):**  
-   Dữ liệu được gom thành từng cửa sổ 30s–90s. LLM chỉ được gọi **ĐÚNG 1 LẦN per batch** (giảm 98% chi phí API), áp dụng prompt chuyên gia 60 từ để sinh ra đoạn văn xuôi bối cảnh hoàn chỉnh, bảo tồn nguyên vẹn tên riêng và từ gốc tiếng Anh.
-4. **Tạo Vector Embedding Đa thức (Multimodal Embedding):**  
-   * SigLIP 2 tạo Vector hình ảnh 768D từ Keyframes.
-   * BGE-M3 tạo Vector văn bản 1024D từ chuỗi kết hợp `[Vật thể + Chữ OCR + Lời nói ASR + Bối cảnh LLM]`.
-5. **Đánh chỉ mục FAISS & Lưu trữ Metadata:**  
-   Tất cả vector được chuẩn hóa L2 và lưu vào `faiss_index.bin`. Metadata được ghi đồng thời vào file `.json` và database SQLite `metadata.db`.
+### Phase 1: Offline Indexing (Trích xuất Sạch tuyệt đối)
+1. Cắt video thành các Shot và trích xuất Frame tĩnh (Pruning).
+2. YOLOE-26 và PaddleOCR trích xuất Raw Labels. Lọc OCR rác thông qua thuật toán giao thoa (Intersection).
+3. Gom dữ liệu vào khung cửa sổ (Window). LLM tóm tắt bối cảnh phục vụ duy nhất cho Semantic Retrieval.
+4. SigLIP 2 tạo Vector Vision (768D), BGE-M3 tạo Dense Vector (1024D) và ghi Sparse Lexical Tensor (.npz).
+
+### Phase 2: Online Retrieval (Vũ khí Tốc độ)
+1. **Canonicalization:** Truy vấn đầu vào được xử lý bởi Lexicon Parser, đệm thêm các từ vựng gốc (Canonical IDs) để tạo `sparse_input`.
+2. **Dual FAISS Query:** Tìm Top-K frame có Cosine Similarity lớn nhất từ Vision và Text Dense Index.
+3. **SpMM Lexical Matching:** Trọng số Sparse của câu query được nhân ma trận (Multiply) với toàn bộ Database Sparse Tensor siêu tốc trên GPU.
+4. **Late Fusion & Reranking:** Hợp nhất điểm 3 luồng và chạy Temporal Reranking trả về top 100 kết quả chuẩn xác nhất.
 
 ---
 
@@ -109,43 +112,34 @@ Hệ thống được thiết kế theo mô hình **Pipeline Khép kín (Offline
 
 ### 1. Chuẩn bị API Keys & Kaggle Secrets
 Nạp các Secret sau vào Kaggle Notebook (**Add-ons** -> **Secrets**):
-* `GROQ_API_KEY`: Chuỗi các Groq Key phân cách bởi dấu phẩy (`gsk_key1,gsk_key2,gsk_key3,gsk_key4`).
-* `GEMINI_API_KEY`: Gemini Flash API Key.
-* `GITHUB_TOKEN`: Personal Access Token (PAT) nếu Repo để ở chế độ Private.
+* `GROQ_API_KEY`: Chuỗi các Groq Key phân cách bởi dấu phẩy.
+* `GEMINI_API_KEY`: Gemini Flash API Key (dự phòng).
+* `GITHUB_TOKEN`: Personal Access Token (PAT).
 
-### 2. Thực thi Notebook `kaggle_executor.ipynb`
-
-* **Cell 1:** Clone / Pull mã nguồn mới nhất từ GitHub.
-```python
-!git clone https://github.com/DntdToM/aic2026_retrieval_project.git
-%cd aic2026_retrieval_project
-```
-* **Cell 2 & 3:** Cài đặt phụ thuộc hệ thống & thư viện Python.
+### 2. Thực thi Pipeline
+* Clone mã nguồn:
 ```bash
-!apt-get update && apt-get install -y ffmpeg libsm6 libxext6
-!pip install -r requirements.txt
+git clone https://github.com/DntdToM/W1.1Thr34d-AIC26-YOLOe26.git
+cd W1.1Thr34d-AIC26-YOLOe26
 ```
-* **Cell 4:** Nạp API Keys & Tải Weights mô hình.
-* **Cell 5:** Khởi chạy Offline Indexing Pipeline.
+* Khởi chạy Offline Indexing:
 ```bash
-!python run_pipeline.py
+python run_pipeline.py
 ```
-* **Cell 6:** Nén kết quả thành `output_data.zip` để tải về.
+* Khởi chạy Online Retrieval (Testing):
+```bash
+python src/backend/fast_retrieval.py
+```
 
 ---
 
-## 5. Cấu trúc Thư mục Kết quả (Output Structure)
+## 5. Cấu trúc Output (Processed Data)
 
 ```text
 processed_data/
-├── 1_frames/                # Thư mục lưu các file ảnh Keyframes (.jpg)
-├── 2_embeddings/            # Thư mục lưu Vector Embeddings (.npy) & FAISS Index (.bin)
-│   ├── video_name_img_emb.npy
-│   ├── video_name_text_emb.npy
-│   └── faiss_index.bin
-└── 3_metadata/              # Thư mục lưu Metadata (.json) & Database SQLite (.db)
-    ├── video_name_metadata.json
-    └── metadata.db
+├── 1_frames/                # Khung hình ảnh (.jpg)
+├── 2_embeddings/            # FAISS Index (.bin), Sparse Tensors (.npz)
+└── 3_metadata/              # Metadata JSON & Canonical Lexicon Cache
 ```
 
 ---
