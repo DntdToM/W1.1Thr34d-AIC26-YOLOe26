@@ -9,16 +9,16 @@ import streamlit as st
 
 st.set_page_config(
     page_title="AIC 2026 Multimedia Retrieval System",
-    page_icon="🎬",
+    page_icon="[SYSTEM]",
     layout="wide"
 )
 
-st.title("🎬 AIC 2026 Multimedia Retrieval System")
+st.title("[SYSTEM] AIC 2026 Multimedia Retrieval System")
 st.markdown("### Hệ thống truy xuất Video đa phương tiện độ trễ Mili-giây (Local-First Architecture)")
 
 # --- SIDEBAR CONFIGURATION ---
 with st.sidebar:
-    st.header("⚙️ Cấu hình Trọng số & Tìm kiếm")
+    st.header("[CONFIG] Cấu hình Trọng số & Tìm kiếm")
     image_weight = st.slider("Trọng số Hình ảnh (SigLIP 2)", 0.0, 1.0, 0.60, 0.05)
     metadata_weight = st.slider("Trọng số Metadata (OCR/Objects)", 0.0, 1.0, 0.30, 0.05)
     audio_weight = st.slider("Trọng số Âm thanh (PhoWhisper)", 0.0, 1.0, 0.10, 0.05)
@@ -27,9 +27,9 @@ with st.sidebar:
     backend_url = st.text_input("FastAPI Backend URL", "http://localhost:8000")
 
 # --- MAIN SEARCH INTERFACE ---
-query = st.text_input("🔍 Nhập từ khóa hoặc mô tả cảnh quay (Ví dụ: 'Người đi bộ trên phố cà phê Hà Nội'):", "")
+query = st.text_input("[SEARCH] Nhập từ khóa hoặc mô tả cảnh quay (Ví dụ: 'Người đi bộ trên phố cà phê Hà Nội'):", "")
 
-if st.button("🚀 Tìm kiếm Video", type="primary") and query:
+if st.button("Tìm kiếm Video", type="primary") and query:
     st.info(f"Đang gửi yêu cầu tìm kiếm cho: '{query}'...")
 
     payload = {
@@ -59,19 +59,19 @@ if st.button("🚀 Tìm kiếm Video", type="primary") and query:
                     col1, col2 = st.columns([1, 2])
                     
                     with col1:
-                        st.markdown(f"**📹 Video:** `{clip.get('video_id')}`")
-                        st.markdown(f"**⏱️ Thời gian:** `{clip.get('start_time_str')}` ➔ `{clip.get('end_time_str')}` ({clip.get('duration_sec')}s)")
-                        st.markdown(f"**🎯 Shots:** `{clip.get('start_shot_id')}` đến `{clip.get('end_shot_id')}`")
-                        st.markdown(f"**🖼️ Keyframes count:** `{clip.get('keyframes_count')}`")
+                        st.markdown(f"**[VIDEO] Video:** `{clip.get('video_id')}`")
+                        st.markdown(f"**[TIME] Thời gian:** `{clip.get('start_time_str')}` ➔ `{clip.get('end_time_str')}` ({clip.get('duration_sec')}s)")
+                        st.markdown(f"**[SHOTS] Shots:** `{clip.get('start_shot_id')}` đến `{clip.get('end_shot_id')}`")
+                        st.markdown(f"**[FRAMES] Keyframes count:** `{clip.get('keyframes_count')}`")
                         
                     with col2:
-                        st.markdown(f"**📝 Bối cảnh 30s (Context Summary):**")
+                        st.markdown(f"**[CONTEXT] Bối cảnh 30s (Context Summary):**")
                         st.caption(clip.get("context_summary", "Không có bối cảnh."))
 
                     # RENDER KEYFRAMES IMAGES
                     keyframes = clip.get("keyframes", [])
                     if keyframes:
-                        st.markdown("**🖼️ Các Khung hình Keyframes tiêu biểu trong Clip:**")
+                        st.markdown("**[FRAMES] Các Khung hình Keyframes tiêu biểu trong Clip:**")
                         cols = st.columns(min(len(keyframes), 4))
                         for k_idx, kf in enumerate(keyframes):
                             col_target = cols[k_idx % len(cols)]

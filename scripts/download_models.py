@@ -78,7 +78,7 @@ def download_all_models():
                     model = AutoModel.from_pretrained(repo_id)
                     processor.save_pretrained(save_dir)
                     model.save_pretrained(save_dir)
-                    print(f"  --> ✅ Tải thành công mô hình '{name}'!")
+                    print(f"  --> [SUCCESS] Tải thành công mô hình '{name}'!")
                 results[name] = True
 
             elif m_type == "sentence_transformers":
@@ -87,7 +87,7 @@ def download_all_models():
                 else:
                     st_model = SentenceTransformer(repo_id)
                     st_model.save(save_dir)
-                    print(f"  --> ✅ Tải thành công mô hình '{name}'!")
+                    print(f"  --> [SUCCESS] Tải thành công mô hình '{name}'!")
                 results[name] = True
 
             elif m_type == "phowhisper":
@@ -98,7 +98,7 @@ def download_all_models():
                     model = AutoModelForSpeechSeq2Seq.from_pretrained(repo_id)
                     processor.save_pretrained(save_dir)
                     model.save_pretrained(save_dir)
-                    print(f"  --> ✅ Tải thành công mô hình '{name}'!")
+                    print(f"  --> [SUCCESS] Tải thành công mô hình '{name}'!")
                 results[name] = True
                 
             elif m_type == "url":
@@ -108,13 +108,13 @@ def download_all_models():
                 else:
                     print(f"  --> Downloading from {repo_id}...")
                     urllib.request.urlretrieve(repo_id, save_dir)
-                    print(f"  --> ✅ Tải thành công '{name}'!")
+                    print(f"  --> [SUCCESS] Tải thành công '{name}'!")
                 results[name] = True
 
             elif m_type == "torch_hub":
                 torch.hub.set_dir(save_dir)
                 model = torch.hub.load(repo_id, 'silero_vad', force_reload=False)
-                print(f"  --> ✅ Tải thành công '{name}' vào '{save_dir}'!")
+                print(f"  --> [SUCCESS] Tải thành công '{name}' vào '{save_dir}'!")
                 results[name] = True
 
             elif m_type == "paddleocr":
@@ -125,7 +125,7 @@ def download_all_models():
                 results[name] = True
 
         except Exception as e:
-            print(f"  --> ❌ LỖI khi tải mô hình '{name}': {e}")
+            print(f"  --> [ERROR] LỖI khi tải mô hình '{name}': {e}")
             traceback.print_exc()
             results[name] = False
             all_success = False
@@ -134,15 +134,15 @@ def download_all_models():
     print("=== BẢNG KIỂM TRA TRẠNG THÁI TẢI (CHECKLIST) ===")
     print("==========================================================")
     for name, success in results.items():
-        status = "[✓] THÀNH CÔNG" if success else "[✗] THẤT BẠI"
+        status = "[SUCCESS] THÀNH CÔNG" if success else "[FAILED] THẤT BẠI"
         print(f"{status:15} : {name}")
 
     print("==========================================================")
     if all_success:
-        print("\n✅ TẤT CẢ MODEL ĐÃ SẴN SÀNG! CÓ THỂ CHẠY PIPELINE NGAY BÂY GIỜ.")
+        print("\n[SUCCESS] TẤT CẢ MODEL ĐÃ SẴN SÀNG! CÓ THỂ CHẠY PIPELINE NGAY BÂY GIỜ.")
         sys.exit(0)
     else:
-        print("\n❌ CÓ LỖI XẢY RA! Vui lòng kiểm tra lại mạng. CHƯƠNG TRÌNH DỪNG LẠI (CRASH).")
+        print("\n[FATAL] CÓ LỖI XẢY RA! Vui lòng kiểm tra lại mạng. CHƯƠNG TRÌNH DỪNG LẠI (CRASH).")
         sys.exit(1)
 
 
