@@ -15,7 +15,7 @@ def main():
 
     print("[OCR_ENV] Đang khởi tạo PaddleOCR...")
     # Khởi tạo model (chỉ load 1 lần khi script này được gọi)
-    ocr = PaddleOCR(use_angle_cls=True, lang='vi', show_log=False)
+    ocr = PaddleOCR(use_textline_orientation=True, lang='vi')
     
     results = {}
     valid_extensions = ('.png', '.jpg', '.jpeg')
