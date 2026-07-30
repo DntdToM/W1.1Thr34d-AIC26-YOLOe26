@@ -17,7 +17,11 @@ if [ -d "$ENV_DIR" ]; then
     echo "[INFO] Isolated environment already exists at $ENV_DIR"
 else
     echo "[INFO] Creating new virtual environment at $ENV_DIR..."
-    python3 -m venv "$ENV_DIR"
+    # Use --without-pip to avoid Debian ensurepip bugs on Kaggle
+    python3 -m venv --without-pip "$ENV_DIR"
+    
+    echo "[INFO] Installing pip into virtual environment..."
+    curl -sS https://bootstrap.pypa.io/get-pip.py | "$ENV_DIR/bin/python"
     
     echo "[INFO] Activating environment and installing PaddleOCR 3.7.0..."
     source "$ENV_DIR/bin/activate"
