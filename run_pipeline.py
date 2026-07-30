@@ -87,7 +87,7 @@ def main():
         logger.info("----------------------------------------------------------")
         logger.info("Initiating global FAISS index construction...")
         vdb = build_global_index()
-        logger.info(f"Global FAISS index construction complete. Total vectors indexed: {vdb.index.ntotal}")
+        logger.info("Global Hybrid VectorDB (FAISS + Sparse) construction complete!")
     
     logger.info("==========================================================")
 
