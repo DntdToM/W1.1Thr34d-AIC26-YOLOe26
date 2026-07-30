@@ -335,24 +335,30 @@ class VisionAnalytics:
         self._init_ocr_engines()
 
     def _init_yolo(self) -> Optional[Any]:
-        """Initialize YOLOv9 model object from ultralytics library."""
+        """Initialize YOLOE-26 model object from ultralytics library."""
         try:
             from ultralytics import YOLO
             model = YOLO(self.yolo_model_path)
-            logger.info(f"YOLOv9 model loaded successfully from '{self.yolo_model_path}'.")
+            logger.info(f"YOLOE-26 model loaded successfully from '{self.yolo_model_path}'.")
             return model
         except Exception as e:
-            logger.error(f"YOLOv9 initialization failed from '{self.yolo_model_path}': {e}")
+            logger.error(f"YOLOE-26 initialization failed from '{self.yolo_model_path}': {e}")
             return None
 
     def _init_ocr_engines(self):
-        """Initialize PaddleOCR engine."""
+        """Initialize PaddleOCR engine by checking the microservice."""
         try:
-            from paddleocr import PaddleOCR
-            self.paddleocr_engine = PaddleOCR(use_angle_cls=self.use_angle_cls, lang=self.ocr_lang, show_log=False)
-            logger.info(f"PaddleOCR engine initialized (lang={self.ocr_lang}).")
+            import requests
+            response = requests.get("http://localhost:5050/health", timeout=5)
+            if response.status_code == 200:
+                self.paddleocr_engine = "http://localhost:5050/ocr"
+                logger.info(f"PaddleOCR Microservice is reachable (lang={self.ocr_lang}).")
+            else:
+                self.paddleocr_engine = None
+                logger.warning(f"PaddleOCR Microservice unhealthy: {response.status_code}")
         except Exception as e:
-            logger.info(f"PaddleOCR engine unavailable: {e}")
+            self.paddleocr_engine = None
+            logger.info(f"PaddleOCR Microservice unavailable (is setup_ocr_server.sh running?): {e}")
 
     def detect_objects_with_boxes(self, frame_path: str) -> List[Dict[str, Any]]:
         """Perform object detection returning bounding boxes."""
@@ -374,24 +380,26 @@ class VisionAnalytics:
             return []
 
     def extract_ocr_with_boxes(self, frame_path: str) -> List[Dict[str, Any]]:
-        """Extract OCR text with bounding boxes using PaddleOCR."""
+        """Extract OCR text with bounding boxes using PaddleOCR Microservice."""
         extracted = []
         if self.paddleocr_engine is not None:
             try:
-                result = self.paddleocr_engine.ocr(frame_path, cls=self.use_angle_cls)
-                if result and len(result) > 0 and result[0]:
-                    for res_item in result[0]:
-                        if not res_item:
-                            continue
-                        if isinstance(res_item, (list, tuple)) and len(res_item) >= 2:
-                            box = res_item[0]  # [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
-                            text_info = res_item[1]
-                            if isinstance(text_info, (list, tuple)) and len(text_info) >= 1:
-                                text_str = str(text_info[0]).strip()
-                                if text_str:
-                                    extracted.append({"text": text_str, "box": box})
-                            elif isinstance(text_info, str) and text_info.strip():
-                                extracted.append({"text": text_info.strip(), "box": box})
+                import requests
+                # Send request to OCR microservice
+                response = requests.post(
+                    self.paddleocr_engine,
+                    json={"image_path": frame_path},
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("status") == "success":
+                        extracted = data.get("results", [])
+                    else:
+                        logger.warning(f"PaddleOCR Server returned error: {data.get('error')}")
+                else:
+                    logger.warning(f"PaddleOCR Server HTTP Error: {response.status_code}")
             except Exception as e:
                 logger.warning(f"PaddleOCR extraction error: {e}")
         return extracted

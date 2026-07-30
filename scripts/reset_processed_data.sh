@@ -17,5 +17,5 @@ for folder in "processed_data/1_frames" "processed_data/2_embeddings" "processed
     fi
 done
 
-echo "✅ Đã dọn dẹp sạch sẽ toàn bộ dữ liệu cũ trong processed_data!"
+echo "[SUCCESS] Đã dọn dẹp sạch sẽ toàn bộ dữ liệu cũ trong processed_data!"
 echo "=========================================================="

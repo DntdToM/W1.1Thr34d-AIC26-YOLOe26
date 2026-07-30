@@ -118,10 +118,7 @@ def download_all_models():
                 results[name] = True
 
             elif m_type == "paddleocr":
-                from paddleocr import PaddleOCR
-                os.environ['MODULE_BASE_DIR'] = save_dir
-                ocr = PaddleOCR(use_angle_cls=True, lang='vi', use_gpu=False, show_log=False)
-                print(f"  --> ✅ Tải thành công '{name}'!")
+                print(f"  --> [INFO] PaddleOCR models are now isolated. Run 'bash scripts/setup_ocr_server.sh' on Kaggle to setup and download OCR models.")
                 results[name] = True
 
         except Exception as e:
