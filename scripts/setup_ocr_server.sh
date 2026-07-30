@@ -13,11 +13,11 @@ echo "=========================================="
 echo "    PADDLEOCR 3.7.0 ISOLATION SETUP       "
 echo "=========================================="
 
-if [ -d "$ENV_DIR" ]; then
-    echo "[INFO] Isolated environment already exists at $ENV_DIR"
+if [ -f "$ENV_DIR/.setup_success" ]; then
+    echo "[INFO] Isolated environment is fully installed and verified at $ENV_DIR"
 else
-    echo "[INFO] Creating new virtual environment at $ENV_DIR..."
-    # Use --without-pip to avoid Debian ensurepip bugs on Kaggle
+    echo "[INFO] Incomplete or missing environment. Setting up at $ENV_DIR..."
+    rm -rf "$ENV_DIR"
     python3 -m venv --without-pip "$ENV_DIR"
     
     echo "[INFO] Installing pip into virtual environment..."
@@ -40,6 +40,7 @@ else
     echo "[INFO] Installing paddleocr==3.7.0 and paddlex..."
     pip install paddleocr==3.7.0 paddlex
     
+    touch "$ENV_DIR/.setup_success"
     deactivate
     echo "[SUCCESS] Installation complete."
 fi
