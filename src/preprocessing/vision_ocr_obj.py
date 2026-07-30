@@ -5,8 +5,12 @@ import time
 import logging
 from typing import List, Dict, Any, Optional
 import yaml
-import requests
 import torch
+import uuid
+import shutil
+import subprocess
+import json
+import cv2
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("VisionAnalytics")
@@ -331,8 +335,6 @@ class VisionAnalytics:
         self.use_angle_cls = ocr_cfg.get("use_angle_cls", True)
 
         self.yolo_model = self._init_yolo()
-        self.paddleocr_engine = None
-        self._init_ocr_engines()
 
     def _init_yolo(self) -> Optional[Any]:
         """Initialize YOLOE-26 model object from ultralytics library."""
@@ -344,21 +346,6 @@ class VisionAnalytics:
         except Exception as e:
             logger.error(f"YOLOE-26 initialization failed from '{self.yolo_model_path}': {e}")
             return None
-
-    def _init_ocr_engines(self):
-        """Initialize PaddleOCR engine by checking the microservice."""
-        try:
-            import requests
-            response = requests.get("http://localhost:5050/health", timeout=5)
-            if response.status_code == 200:
-                self.paddleocr_engine = "http://localhost:5050/ocr"
-                logger.info(f"PaddleOCR Microservice is reachable (lang={self.ocr_lang}).")
-            else:
-                self.paddleocr_engine = None
-                logger.warning(f"PaddleOCR Microservice unhealthy: {response.status_code}")
-        except Exception as e:
-            self.paddleocr_engine = None
-            logger.info(f"PaddleOCR Microservice unavailable (is setup_ocr_server.sh running?): {e}")
 
     def detect_objects_with_boxes(self, frame_path: str) -> List[Dict[str, Any]]:
         """Perform object detection returning bounding boxes."""
@@ -379,30 +366,115 @@ class VisionAnalytics:
             logger.error(f"YOLO detection error: {e}")
             return []
 
-    def extract_ocr_with_boxes(self, frame_path: str) -> List[Dict[str, Any]]:
-        """Extract OCR text with bounding boxes using PaddleOCR Microservice."""
-        extracted = []
-        if self.paddleocr_engine is not None:
-            try:
-                import requests
-                # Send request to OCR microservice
-                response = requests.post(
-                    self.paddleocr_engine,
-                    json={"image_path": frame_path},
-                    timeout=10
-                )
+    def run_ocr_offline(self, image_dir: str, output_json: str) -> Dict[str, str]:
+        logger.info(f"Đang gọi Conda xử lý OCR cho thư mục {image_dir}...")
+        custom_env = os.environ.copy()
+        custom_env.pop("PYTHONPATH", None)
+
+        cmd = [
+            "/opt/conda/bin/conda", "run", "-n", "ocr_env", 
+            "python", "scripts/offline_ocr_batch.py", 
+            "--input_dir", image_dir,
+            "--output_file", output_json
+        ]
+        
+        try:
+            subprocess.run(cmd, env=custom_env, check=True)
+            if os.path.exists(output_json):
+                with open(output_json, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            else:
+                return {}
+        except subprocess.CalledProcessError as e:
+            logger.error(f"[LỖI] Tiến trình OCR qua Conda thất bại: {e}")
+            return {}
+        except Exception as e:
+            logger.error(f"[LỖI] Lỗi không xác định khi chạy OCR: {e}")
+            return {}
+
+    def analyze_frames_batch(self, frame_paths: List[str], video_id: str = None) -> List[Dict[str, Any]]:
+        """Batch process object detection and OCR for multiple frames using Conda isolation."""
+        vid = video_id if video_id else str(uuid.uuid4())
+        temp_dir = f"temp_ocr_{vid}"
+        out_json = f"ocr_results_{vid}.json"
+        
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        frame_crop_mapping = {}
+        all_results = []
+        
+        # Step 1: Detect objects and crop them
+        for idx, fp in enumerate(frame_paths):
+            if not os.path.exists(fp):
+                all_results.append({
+                    "frame_path": fp,
+                    "objects": [],
+                    "ocr_raw": "",
+                    "ocr_fixed": ""
+                })
+                continue
                 
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get("status") == "success":
-                        extracted = data.get("results", [])
-                    else:
-                        logger.warning(f"PaddleOCR Server returned error: {data.get('error')}")
-                else:
-                    logger.warning(f"PaddleOCR Server HTTP Error: {response.status_code}")
-            except Exception as e:
-                logger.warning(f"PaddleOCR extraction error: {e}")
-        return extracted
+            yolo_results = self.detect_objects_with_boxes(fp)
+            unique_classes = list(set([item["class"] for item in yolo_results]))
+            
+            # Save crops for OCR
+            img = cv2.imread(fp)
+            crop_filenames = []
+            if img is not None:
+                for box_idx, obj in enumerate(yolo_results):
+                    x1, y1, x2, y2 = map(int, obj["box"])
+                    # Ensure coordinates are within image bounds
+                    h, w = img.shape[:2]
+                    x1, y1 = max(0, x1), max(0, y1)
+                    x2, y2 = min(w, x2), min(h, y2)
+                    
+                    if x2 > x1 and y2 > y1:
+                        crop = img[y1:y2, x1:x2]
+                        crop_name = f"frame_{idx}_box_{box_idx}.jpg"
+                        cv2.imwrite(os.path.join(temp_dir, crop_name), crop)
+                        crop_filenames.append(crop_name)
+            
+            frame_crop_mapping[idx] = {
+                "fp": fp,
+                "objects": unique_classes,
+                "crop_filenames": crop_filenames
+            }
+            # Placeholder in all_results
+            all_results.append(None)
+            
+        # Step 2: Run offline OCR batch script via Conda
+        ocr_results_dict = self.run_ocr_offline(temp_dir, out_json)
+        
+        # Step 3: Map results back
+        for idx in frame_crop_mapping:
+            mapping = frame_crop_mapping[idx]
+            fp = mapping["fp"]
+            unique_classes = mapping["objects"]
+            
+            valid_ocr_texts = []
+            for c_name in mapping["crop_filenames"]:
+                text = ocr_results_dict.get(c_name, "")
+                if text:
+                    valid_ocr_texts.append(text)
+                    
+            ocr_combined = " ".join(valid_ocr_texts).strip()
+            
+            all_results[idx] = {
+                "frame_path": fp,
+                "objects": unique_classes,
+                "ocr_raw": ocr_combined,
+                "ocr_fixed": ocr_combined
+            }
+            
+        # Step 4: Cleanup
+        try:
+            shutil.rmtree(temp_dir)
+            if os.path.exists(out_json):
+                os.remove(out_json)
+        except Exception as e:
+            logger.warning(f"Cleanup of {temp_dir} failed: {e}")
+            
+        return all_results
 
     def analyze_frame(self, frame_path: str) -> Dict[str, Any]:
         """Extract features with spatial intersection logic."""

@@ -111,28 +111,13 @@ if not os.path.exists(yoloe_path):
     print("Downloading YOLOE-26L-PF...")
     !wget -q {yoloe_url} -O {yoloe_path}
 
-print("Setting up Isolated PaddleOCR Microservice...")
-!bash scripts/setup_ocr_server.sh
+print("Setting up Conda OCR Environment...")
+!bash scripts/setup_ocr_env.sh
 ```
 
-### Cell 5: Check Microservice Health and Execute Pipeline
+### Cell 5: Execute Pipeline
 
 ```python
-import time
-import requests
-
-print("Waiting for OCR Microservice to be ready...")
-for i in range(15):
-    try:
-        if requests.get("http://localhost:5050/health").status_code == 200:
-            print("[SUCCESS] OCR Microservice is ONLINE and Models are loaded!")
-            break
-    except:
-        pass
-    time.sleep(2)
-else:
-    print("[WARNING] OCR Microservice might not be ready yet.")
-
 !python run_pipeline.py
 ```
 

@@ -157,10 +157,14 @@ class MultiThreadPipelineWorker:
             parsed_event_list = preparse_asr_map(audio_event_map)
 
             for meta in keyframes_meta:
-                img_path = meta["saved_path"]
-                image_paths.append(img_path)
+                image_paths.append(meta["saved_path"])
 
-                vision_res = self.vision_analytics.analyze_frame(img_path)
+            # Batch process YOLO and OCR via Conda offline
+            logger.info(f"[{video_name}] Running YOLO object detection and Conda Offline OCR batch processing...")
+            vision_results = self.vision_analytics.analyze_frames_batch(image_paths, video_id=video_name)
+
+            for idx, meta in enumerate(keyframes_meta):
+                vision_res = vision_results[idx]
                 
                 frame_ts = meta.get("timestamp_ms", 0)
                 matched_asr = match_asr_for_timestamp(frame_ts, parsed_asr_list, tolerance_ms=3000)
