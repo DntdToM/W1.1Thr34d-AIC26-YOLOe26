@@ -7,7 +7,7 @@ Pillow>=10.0.0
 PyYAML>=6.0.1
 
 # Vector Search & Metadata
-faiss-gpu>=1.7.4
+# faiss-cpu installed via Conda on Kaggle
 
 # Vision & OCR & ASR Models
 ultralytics>=8.1.0
@@ -20,6 +20,7 @@ sentence-transformers>=2.5.0
 huggingface-hub>=0.20.0
 accelerate>=0.27.0
 transnetv2-pytorch>=0.1.0
+FlagEmbedding>=1.2.0
 
 # LLM APIs
 groq>=0.4.0

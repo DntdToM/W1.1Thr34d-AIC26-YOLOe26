@@ -55,7 +55,8 @@ class EmbeddingGenerator:
                 self.vision_processor = AutoImageProcessor.from_pretrained(self.vision_model_name)
                 self.vision_model = AutoModel.from_pretrained(
                     self.vision_model_name,
-                    torch_dtype=self.torch_dtype
+                    dtype=self.torch_dtype,
+                    trust_remote_code=True
                 ).to(self.device)
                 self.vision_model.eval()
                 logger.info("SigLIP 2 model loaded successfully.")
