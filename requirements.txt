@@ -7,7 +7,7 @@ Pillow>=10.0.0
 PyYAML>=6.0.1
 
 # Vector Search & Metadata
-faiss-cpu==1.8.0
+faiss-cpu==1.14.3
 
 # Vision & OCR & ASR Models
 ultralytics>=8.1.0
