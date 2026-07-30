@@ -7,7 +7,7 @@ Pillow>=10.0.0
 PyYAML>=6.0.1
 
 # Vector Search & Metadata
-# faiss-cpu installed via Conda on Kaggle
+faiss-cpu==1.8.0
 
 # Vision & OCR & ASR Models
 ultralytics>=8.1.0

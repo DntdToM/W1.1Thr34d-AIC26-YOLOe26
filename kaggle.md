@@ -46,10 +46,9 @@ else:
 !apt-get update && apt-get install -y ffmpeg libsm6 libxext6
 ```
 
-### Cell 3: Install Python dependencies (Optimized FAISS + PIP packages)
+### Cell 3: Install Python dependencies
 
 ```python
-!/opt/conda/bin/conda install -y -c pytorch -c conda-forge faiss-cpu
 !pip install -r requirements.txt
 ```
 
