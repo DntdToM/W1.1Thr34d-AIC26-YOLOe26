@@ -95,7 +95,7 @@ if GDRIVE_FILE_ID:
 else:
     print("Missing GDRIVE_FILE_ID; dataset access denied.")
 
-if not os.path.exists("models/siglip-base-patch16-224") or not os.path.exists("models/bge-m3"):
+if not os.path.exists("models/siglip-base-patch16-224"):
     print("Downloading model weights to local models/ directory...")
     !mkdir -p src/preprocessing/weights/
     !wget -q -O src/preprocessing/weights/transnetv2-pytorch-weights.pth https://huggingface.co/spaces/jixiaojia/TransNetV2/resolve/main/transnetv2-pytorch-weights.pth

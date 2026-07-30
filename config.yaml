@@ -36,7 +36,7 @@ models:
     dimension: 768
     device: "cuda"
   text_embedding:
-    name: "models/bge-m3"  # Local Workspace BGE-M3 model directory
+    name: "BAAI/bge-m3"  # Download directly from HuggingFace
     dimension: 1024
     device: "cuda"
   object_detection:

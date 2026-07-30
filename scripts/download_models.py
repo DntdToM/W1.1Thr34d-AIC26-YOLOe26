@@ -28,12 +28,6 @@ models_to_download = [
         "type": "transformers"
     },
     {
-        "name": "BGE-M3 Text Embedding",
-        "repo_id": "BAAI/bge-m3",
-        "save_dir": os.path.join(MODELS_DIR, "bge-m3"),
-        "type": "sentence_transformers"
-    },
-    {
         "name": "PhoWhisper Small ASR",
         "repo_id": "vinai/phowhisper-small",
         "save_dir": os.path.join(MODELS_DIR, "phowhisper-small"),
