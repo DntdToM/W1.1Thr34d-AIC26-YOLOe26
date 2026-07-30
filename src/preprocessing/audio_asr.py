@@ -9,6 +9,7 @@ import torch
 import numpy as np
 import subprocess
 import scipy.io.wavfile as wavfile
+import traceback
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("AudioASRProcessor")
@@ -263,7 +264,12 @@ class AudioASRProcessor:
                 start_ms = seg["start_ms"]
                 end_ms = seg["end_ms"]
                 audio_chunk = audio_np[seg["start_sample"]:seg["end_sample"]]
-                if len(audio_chunk) == 0:
+                if audio_chunk is None or len(audio_chunk) == 0:
+                    logger.info(f"Khoảng âm thanh {start_ms}-{end_ms}ms bị rỗng, tự động bỏ qua.")
+                    continue
+
+                if len(audio_chunk) < (0.1 * self.sample_rate):
+                    logger.info(f"Khoảng âm thanh {start_ms}-{end_ms}ms quá ngắn, tự động bỏ qua.")
                     continue
 
                 try:
@@ -274,7 +280,8 @@ class AudioASRProcessor:
                     )
                     text_content = asr_result.get("text", "").strip()
                 except Exception as e:
-                    logger.warning(f"Transcription failed for audio interval {start_ms}-{end_ms}ms: {e}")
+                    logger.warning(f"Transcription failed for audio interval {start_ms}-{end_ms}ms. Chi tiết lỗi:")
+                    traceback.print_exc()
                     text_content = ""
 
                 if text_content:
