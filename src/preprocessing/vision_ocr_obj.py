@@ -324,8 +324,9 @@ class VisionAnalytics:
         obj_cfg = self.config.get("models", {}).get("object_detection", {})
         ocr_cfg = self.config.get("models", {}).get("ocr", {})
 
-        self.yolo_model_path = obj_cfg.get("yolo_model", "yoloe26.pt")
-        self.conf_threshold = 0.05  # Low threshold to capture small objects, NMS active
+        self.yolo_model_path = obj_cfg.get("yolo_model", "yoloe-26l-seg-pf.pt")
+        self.conf_threshold = obj_cfg.get("confidence_threshold", 0.05)
+        self.agnostic_nms = obj_cfg.get("agnostic_nms", True)
         self.ocr_lang = ocr_cfg.get("lang", "vi")
         self.use_angle_cls = ocr_cfg.get("use_angle_cls", True)
 
@@ -348,7 +349,7 @@ class VisionAnalytics:
         """Initialize PaddleOCR engine."""
         try:
             from paddleocr import PaddleOCR
-            self.paddleocr_engine = PaddleOCR(use_angle_cls=False, lang=self.ocr_lang, show_log=False)
+            self.paddleocr_engine = PaddleOCR(use_angle_cls=False, lang=self.ocr_lang)
             logger.info(f"PaddleOCR engine initialized (lang={self.ocr_lang}).")
         except Exception as e:
             logger.info(f"PaddleOCR engine unavailable: {e}")
@@ -358,7 +359,7 @@ class VisionAnalytics:
         if self.yolo_model is None:
             return []
         try:
-            results = self.yolo_model.predict(source=frame_path, conf=self.conf_threshold, verbose=False)
+            results = self.yolo_model.predict(source=frame_path, conf=self.conf_threshold, verbose=False, agnostic_nms=self.agnostic_nms)
             detected = []
             for result in results:
                 if result.boxes is not None and len(result.boxes) > 0:

@@ -40,8 +40,9 @@ models:
     dimension: 1024
     device: "cuda"
   object_detection:
-    yolo_model: "yoloe26.pt"
+    yolo_model: "yoloe-26l-seg-pf.pt"
     confidence_threshold: 0.35
+    agnostic_nms: true
   ocr:
     lang: "vi"
     use_angle_cls: true

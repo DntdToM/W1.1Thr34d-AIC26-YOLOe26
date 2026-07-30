@@ -120,7 +120,7 @@ def download_all_models():
             elif m_type == "paddleocr":
                 from paddleocr import PaddleOCR
                 os.environ['MODULE_BASE_DIR'] = save_dir
-                ocr = PaddleOCR(use_angle_cls=True, lang='vi', use_gpu=False, show_log=False)
+                ocr = PaddleOCR(use_angle_cls=True, lang='vi', use_gpu=False)
                 print(f"  --> ✅ Tải thành công '{name}'!")
                 results[name] = True
 
