@@ -11,8 +11,8 @@ faiss-cpu>=1.7.4
 
 # Vision & OCR & ASR Models
 ultralytics>=8.1.0
-paddlepaddle>=2.6.0
-paddleocr>=2.8.0
+paddlepaddle>=2.6.0,<3.0.0
+paddleocr>=2.8.0,<3.0.0
 sentencepiece>=0.2.0
 protobuf>=4.25.0
 transformers>=4.38.0

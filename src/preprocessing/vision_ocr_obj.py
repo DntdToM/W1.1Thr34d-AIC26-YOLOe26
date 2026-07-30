@@ -349,7 +349,7 @@ class VisionAnalytics:
         """Initialize PaddleOCR engine."""
         try:
             from paddleocr import PaddleOCR
-            self.paddleocr_engine = PaddleOCR(use_angle_cls=False, lang=self.ocr_lang)
+            self.paddleocr_engine = PaddleOCR(use_angle_cls=self.use_angle_cls, lang=self.ocr_lang, show_log=False)
             logger.info(f"PaddleOCR engine initialized (lang={self.ocr_lang}).")
         except Exception as e:
             logger.info(f"PaddleOCR engine unavailable: {e}")
@@ -378,7 +378,7 @@ class VisionAnalytics:
         extracted = []
         if self.paddleocr_engine is not None:
             try:
-                result = self.paddleocr_engine.ocr(frame_path, cls=False)
+                result = self.paddleocr_engine.ocr(frame_path, cls=self.use_angle_cls)
                 if result and len(result) > 0 and result[0]:
                     for res_item in result[0]:
                         if not res_item:
