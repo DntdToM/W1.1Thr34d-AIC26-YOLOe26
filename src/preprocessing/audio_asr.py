@@ -268,8 +268,8 @@ class AudioASRProcessor:
                     logger.info(f"Khoảng âm thanh {start_ms}-{end_ms}ms bị rỗng, tự động bỏ qua.")
                     continue
 
-                if len(audio_chunk) < (0.1 * self.sample_rate):
-                    logger.info(f"Khoảng âm thanh {start_ms}-{end_ms}ms quá ngắn, tự động bỏ qua.")
+                if len(audio_chunk) < (0.5 * self.sample_rate):
+                    logger.info(f"Khoảng âm thanh {start_ms}-{end_ms}ms quá ngắn (<0.5s), tự động bỏ qua.")
                     continue
 
                 try:
@@ -280,8 +280,7 @@ class AudioASRProcessor:
                     )
                     text_content = asr_result.get("text", "").strip()
                 except Exception as e:
-                    logger.warning(f"Transcription failed for audio interval {start_ms}-{end_ms}ms. Chi tiết lỗi:")
-                    traceback.print_exc()
+                    logger.warning(f"Transcription failed for audio interval {start_ms}-{end_ms}ms (Bỏ qua). Lỗi: {e}")
                     text_content = ""
 
                 if text_content:
