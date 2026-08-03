@@ -95,20 +95,8 @@ if GDRIVE_FILE_ID:
 else:
     print("Missing GDRIVE_FILE_ID; dataset access denied.")
 
-if not os.path.exists("models/siglip-base-patch16-224"):
-    print("Downloading model weights to local models/ directory...")
-    !mkdir -p src/preprocessing/weights/
-    !wget -q -O src/preprocessing/weights/transnetv2-pytorch-weights.pth https://huggingface.co/spaces/jixiaojia/TransNetV2/resolve/main/transnetv2-pytorch-weights.pth
-    !python scripts/download_models.py
-else:
-    print("Model weights verified in models/ directory.")
-
-# Tải trọng số YOLOE-26L-PF (Bản Large, Prompt-Free) trực tiếp từ Ultralytics
-yoloe_url = "https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26l-seg-pf.pt"
-yoloe_path = "/kaggle/working/W1.1Thr34d-AIC26-YOLOe26/yoloe-26l-seg-pf.pt"
-if not os.path.exists(yoloe_path):
-    print("Downloading YOLOE-26L-PF...")
-    !wget -q {yoloe_url} -O {yoloe_path}
+print("Downloading ALL model weights to local directories...")
+!python scripts/download_models.py
 
 print("Setting up Conda OCR Environment...")
 !bash scripts/setup_ocr_env.sh

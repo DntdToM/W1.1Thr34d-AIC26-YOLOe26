@@ -44,6 +44,30 @@ models_to_download = [
         "repo_id": "paddleocr",
         "save_dir": os.path.join(MODELS_DIR, "paddleocr"),
         "type": "paddleocr"
+    },
+    {
+        "name": "BGE-M3 Text Embedding",
+        "repo_id": "BAAI/bge-m3",
+        "save_dir": os.path.join(MODELS_DIR, "bge-m3"),
+        "type": "transformers"
+    },
+    {
+        "name": "CLAP Zero-Shot Audio",
+        "repo_id": "laion/clap-htsat-unfused",
+        "save_dir": os.path.join(MODELS_DIR, "clap-htsat-unfused"),
+        "type": "transformers"
+    },
+    {
+        "name": "TransNetV2",
+        "repo_id": "https://huggingface.co/spaces/jixiaojia/TransNetV2/resolve/main/transnetv2-pytorch-weights.pth",
+        "save_dir": os.path.join(PROJECT_ROOT, "src", "preprocessing", "weights", "transnetv2-pytorch-weights.pth"),
+        "type": "url"
+    },
+    {
+        "name": "YOLOE-26L-PF",
+        "repo_id": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26l-seg-pf.pt",
+        "save_dir": os.path.join(PROJECT_ROOT, "yoloe-26l-seg-pf.pt"),
+        "type": "url"
     }
 ]
 

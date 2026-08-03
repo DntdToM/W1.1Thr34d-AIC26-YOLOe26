@@ -134,7 +134,7 @@ class AudioASRProcessor:
                 device = 0 if torch.cuda.is_available() else -1
                 self.clap_pipeline = pipeline(
                     task="zero-shot-audio-classification",
-                    model="laion/clap-htsat-unfused",
+                    model="models/clap-htsat-unfused",
                     device=device
                 )
                 logger.info("CLAP zero-shot model loaded successfully.")
